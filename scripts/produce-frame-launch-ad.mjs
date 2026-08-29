@@ -54,6 +54,7 @@ async function clipVideo(input, output, start, duration) {
 }
 
 async function main() {
+  const productionStartedAt = Date.now();
   await mkdir(TMP, { recursive: true });
   const localEnv = envFile(await readFile(`${ROOT}/.env.local`, "utf8"));
   const openaiKey = process.env.OPENAI_API_KEY || localEnv.OPENAI_API_KEY;
@@ -140,7 +141,7 @@ async function main() {
   if (!upload.ok) throw new Error(`Convex upload failed: ${upload.status}`);
   const { storageId } = await upload.json();
   const durableUrl = await convex.query(api.generations.getImageUrl, { storageId });
-  const report = { producedAt: new Date().toISOString(), duration: 25, format: "9:16", selectedPaidClips: selectedShots, newVideoGenerations: 0, videoRetries: 0, reusedRunwayCredits: 360, incrementalRunwayCredits: 0, voiceGenerations: 1, music: "Original deterministic procedural bed", sfx: "Original deterministic UI accents", provider: `Runway Gen-4.5 source clips / ${openaiKey ? "OpenAI tts-1-hd" : "macOS Daniel studio voice"}`, storageId, durableUrl, metadata };
+  const report = { productionStartedAt: new Date(productionStartedAt).toISOString(), producedAt: new Date().toISOString(), productionSeconds: Math.round((Date.now() - productionStartedAt) / 1000), duration: 25, format: "9:16", selectedPaidClips: selectedShots, newVideoGenerations: 0, videoRetries: 0, reusedRunwayCredits: 360, incrementalRunwayCredits: 0, voiceGenerations: 1, music: "Original deterministic procedural bed", sfx: "Original deterministic UI accents", provider: `Runway Gen-4.5 source clips / ${openaiKey ? "OpenAI tts-1-hd" : "macOS Daniel studio voice"}`, storageId, durableUrl, metadata };
   await writeFile(`${OUT}/production-report.json`, JSON.stringify(report, null, 2));
   await writeFile(`${OUT}/source-manifest.json`, JSON.stringify({ treatmentId: TREATMENT_ID, selectedClips: selected.map(({ shotNumber, duration, videoUrl, finalCredits }) => ({ shotNumber, duration, videoUrl, finalCredits })), storyboardKeyframes: keyframes }, null, 2));
   console.log(JSON.stringify({ finalPath, durableUrl, report: `${OUT}/production-report.json` }, null, 2));
