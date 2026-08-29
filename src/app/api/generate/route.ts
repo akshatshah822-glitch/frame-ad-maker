@@ -14,6 +14,7 @@ const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"];
 const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"];
 const conceptFields = ["conceptName", "idea", "hook", "story", "productRole", "visualWorld", "ending"] as const;
 const stringShotFields = ["purpose", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "voiceoverOrDialogue", "productPresence", "locationAndProps"] as const;
+const requiredShotContentFields = ["visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "productPresence", "locationAndProps"] as const;
 const visualBibleStringFields = ["subject", "product", "location", "lighting", "cinematography", "texture"] as const;
 const shotStructure = [
   { shotNumber: 1, startTime: 0, endTime: 3, purpose: "HOOK" },
@@ -82,7 +83,8 @@ function parseGeneration(outputText: string): ModelGeneration | null {
     if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length !== 6) return null;
     const valid = parsed.shots.every((shot) => {
       if (!shot || typeof shot !== "object") return false;
-      const stringsComplete = stringShotFields.every((field) => typeof shot[field] === "string" && shot[field].trim().length > 0);
+      const stringsComplete = requiredShotContentFields.every((field) => typeof shot[field] === "string" && shot[field].trim().length > 0)
+        && typeof shot.voiceoverOrDialogue === "string";
       return stringsComplete;
     });
     if (!valid) return null;
