@@ -80,13 +80,18 @@ function parseGeneration(outputText: string): ModelGeneration | null {
     const bibleValid = bible && visualBibleStringFields.every((field) => typeof bible[field] === "string" && (bible[field] as string).trim().length > 0)
       && isNonEmptyStringArray(bible.colorPalette, 4) && isNonEmptyStringArray(bible.continuityLocks);
     if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length !== 6) return null;
-    const valid = parsed.shots.every((shot, index) => {
+    const valid = parsed.shots.every((shot) => {
       if (!shot || typeof shot !== "object") return false;
-      const expected = shotStructure[index];
       const stringsComplete = stringShotFields.every((field) => typeof shot[field] === "string" && shot[field].trim().length > 0);
-      return stringsComplete && shot.shotNumber === expected.shotNumber && shot.startTime === expected.startTime && shot.endTime === expected.endTime && shot.purpose === expected.purpose;
+      return stringsComplete;
     });
-    return valid ? parsed as ModelGeneration : null;
+    if (!valid) return null;
+    return {
+      title: parsed.title,
+      duration: parsed.duration,
+      visualBible: parsed.visualBible,
+      shots: parsed.shots.map((shot, index) => ({ ...shot, ...shotStructure[index] })),
+    } as ModelGeneration;
   } catch {
     return null;
   }
