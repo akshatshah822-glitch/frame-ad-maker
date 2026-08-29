@@ -16,6 +16,11 @@ export const getImageUrl = query({
   handler: async (ctx, { storageId }) => ctx.storage.getUrl(storageId),
 });
 
+export const getById = query({
+  args: { id: v.id("generations") },
+  handler: async (ctx, { id }) => ctx.db.get(id),
+});
+
 export const attachImage = mutation({
   args: {
     generationId: v.id("generations"),

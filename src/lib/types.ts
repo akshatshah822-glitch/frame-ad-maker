@@ -29,11 +29,23 @@ export type VisualBible = {
 
 export type ImageStatus = "pending" | "generating" | "complete" | "failed";
 
+export type AppPhase =
+  | "idle"
+  | "concepts_generating"
+  | "concepts_ready"
+  | "storyboard_generating"
+  | "images_generating"
+  | "storyboard_ready"
+  | "error";
+
 export type Shot = {
   shotNumber: number;
   startTime: number;
   endTime: number;
   purpose: string;
+  displayVisual?: string;
+  displayCamera?: string;
+  displayAction?: string;
   visualDescription: string;
   subjectAction: string;
   cameraFraming: string;
@@ -57,4 +69,11 @@ export type Generation = {
   duration: string;
   visualBible: VisualBible;
   shots: Shot[];
+};
+
+export type TreatmentData = {
+  id?: string;
+  brief: Brief;
+  concept: Concept;
+  generation: Generation;
 };

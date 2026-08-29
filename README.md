@@ -12,6 +12,7 @@ Brief
 → 6 image prompts
 → 6 generated frames
 → Final treatment
+→ Copy, PDF, or unlisted share link
 ```
 
 ## Local setup
@@ -38,6 +39,13 @@ NEXT_PUBLIC_CONVEX_URL=
 - Storyboard frames: `gpt-image-2` through the OpenAI Image API, medium quality JPEG.
 - Images: uploaded to Convex File Storage. The returned file URLs remain available until the stored files are deleted.
 - If image storage fails after rendering, that browser session receives an in-memory data URL so the successful frame is still shown. That fallback does not survive refresh.
+
+## Treatment sharing
+
+- Completed saved treatments have an unlisted `/treatment/[id]` link. Anyone with the link can view it; FRAME does not add accounts or permissions in this MVP.
+- Copy treatment produces clean client-facing text without raw prompts or internal IDs.
+- PDF export is generated server-side as a treatment document with a cover, visual direction, and one storyboard page per shot.
+- Durable share links and PDFs require a successfully saved Convex record. Clipboard copy remains available if persistence is unavailable.
 
 ## Commands
 

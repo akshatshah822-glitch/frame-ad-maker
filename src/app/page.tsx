@@ -1,17 +1,10 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
-import Image from "next/image";
-import { getPlatformFormat } from "@/lib/image-prompt";
-import type { Brief, Concept, Generation, Shot } from "@/lib/types";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { TreatmentView } from "@/components/treatment-view";
+import type { AppPhase, Brief, Concept, Generation, Shot } from "@/lib/types";
 
 const conceptTypes = ["Human / Emotional", "Product / Craft-led", "Unexpected / Conceptual"] as const;
-const shotLabels = ["Hook", "Tension", "Product", "Proof", "Payoff", "Brand"] as const;
-
-function hasDialogue(value: string) {
-  return value.trim().length > 0 && !/^(none|n\/a|no dialogue|no voiceover|silent)$/i.test(value.trim());
-}
-
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"] as const;
 const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"] as const;
 
@@ -45,9 +38,9 @@ export default function Home() {
   const [generation, setGeneration] = useState<Generation | null>(null);
   const [concepts, setConcepts] = useState<Concept[] | null>(null);
   const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [storyboardLoading, setStoryboardLoading] = useState(false);
-  const [studioStatus, setStudioStatus] = useState("");
+  const [phase, setPhase] = useState<AppPhase>("idle");
+  const [conceptElapsed, setConceptElapsed] = useState(0);
+  const [currentShot, setCurrentShot] = useState<number | null>(null);
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [saved, setSaved] = useState<boolean | null>(null);
   const [error, setError] = useState("");
@@ -55,6 +48,16 @@ export default function Home() {
   const showcase = campaignDirections[showcaseIndex];
   const generationRunRef = useRef(false);
   const runIdRef = useRef(0);
+  const conceptAbortRef = useRef<AbortController | null>(null);
+  const conceptsGenerating = phase === "concepts_generating";
+  const storyboardWorking = phase === "storyboard_generating" || phase === "images_generating";
+
+  useEffect(() => {
+    if (!conceptsGenerating) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => setConceptElapsed(Math.floor((Date.now() - startedAt) / 1000)), 500);
+    return () => window.clearInterval(timer);
+  }, [conceptsGenerating]);
 
   function toggleVisualTone(tone: string) {
     setForm((current) => {
@@ -71,23 +74,41 @@ export default function Home() {
       setError("Choose at least one visual tone.");
       return;
     }
-    setLoading(true);
+    conceptAbortRef.current?.abort();
+    const controller = new AbortController();
+    conceptAbortRef.current = controller;
+    const requestRun = ++runIdRef.current;
+    setConceptElapsed(0);
+    setPhase("concepts_generating");
     try {
       const response = await fetch("/api/concepts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
+        signal: controller.signal,
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Something went wrong.");
       if (!Array.isArray(result.concepts) || result.concepts.length !== 3) throw new Error("The concepts came back incomplete. Please generate them again.");
+      if (requestRun !== runIdRef.current) return;
       setConcepts(result.concepts);
       setSelectedConcept(null);
+      setPhase("concepts_ready");
     } catch (err) {
+      if (controller.signal.aborted || requestRun !== runIdRef.current) return;
       setError(err instanceof Error ? err.message : "Something went wrong.");
+      setPhase("error");
     } finally {
-      setLoading(false);
+      if (conceptAbortRef.current === controller) conceptAbortRef.current = null;
     }
+  }
+
+  function cancelConcepts() {
+    runIdRef.current += 1;
+    conceptAbortRef.current?.abort();
+    conceptAbortRef.current = null;
+    setPhase(concepts ? "concepts_ready" : "idle");
+    setConceptElapsed(0);
   }
 
   async function generateConcepts(event: FormEvent<HTMLFormElement>) {
@@ -109,7 +130,7 @@ export default function Home() {
 
   async function renderShot(shot: Shot, savedGenerationId?: string) {
     updateShot(shot.shotNumber, { imageStatus: "generating", imageError: undefined });
-    setStudioStatus(directingCopy[shot.shotNumber - 1]);
+    setCurrentShot(shot.shotNumber);
     try {
       const response = await fetch("/api/images", {
         method: "POST",
@@ -142,7 +163,10 @@ export default function Home() {
       if (runIdRef.current !== runId) return;
       await renderShot(shot, savedGenerationId);
     }
-    if (runIdRef.current === runId) setStudioStatus("");
+    if (runIdRef.current === runId) {
+      setCurrentShot(null);
+      setPhase("storyboard_ready");
+    }
   }
 
   async function generateStoryboard(concept: Concept) {
@@ -150,8 +174,8 @@ export default function Home() {
     generationRunRef.current = true;
     const runId = ++runIdRef.current;
     setSelectedConcept(concept);
-    setStoryboardLoading(true);
-    setStudioStatus("Developing the visual world…");
+    setPhase("storyboard_generating");
+    setCurrentShot(null);
     setError("");
     try {
       const response = await fetch("/api/generate", {
@@ -171,15 +195,22 @@ export default function Home() {
       setGeneration(result.generation);
       setGenerationId(result.generationId ?? null);
       setSaved(result.saved);
-      setStoryboardLoading(false);
+      setPhase("images_generating");
       await renderAllShots(result.generation, runId, result.generationId);
     } catch (err) {
+      if (runIdRef.current !== runId) return;
       setError(err instanceof Error ? err.message : "Something went wrong.");
+      setPhase("error");
     } finally {
-      setStoryboardLoading(false);
-      setStudioStatus("");
       generationRunRef.current = false;
     }
+  }
+
+  async function retryShot(shot: Shot) {
+    setPhase("images_generating");
+    await renderShot(shot, generationId ?? undefined);
+    setCurrentShot(null);
+    setPhase("storyboard_ready");
   }
 
   function restart() {
@@ -190,33 +221,20 @@ export default function Home() {
     setSelectedConcept(null);
     setGenerationId(null);
     setSaved(null);
-    setStudioStatus("");
+    setPhase("idle");
+    setCurrentShot(null);
     setError("");
   }
 
-  if (generation) return <main className="page result-page">
-    <header className="topbar"><button className="wordmark" onClick={restart}>FRAME<span>{"///"}</span></button><span>30 sec ad maker</span><button className="new-button" onClick={restart}>Start over</button></header>
-    <section className="treatment-header"><p className="eyebrow">Approved creative direction</p><div><span>Concept name</span><h1>{selectedConcept?.conceptName ?? generation.title}</h1><p>{selectedConcept?.idea ?? generation.title}</p></div><aside><small>FORMAT</small><strong>{generation.duration}</strong><small>PLATFORM</small><strong>{form.platform}</strong></aside></section>
-    {studioStatus ? <div className="studio-progress" role="status"><span className="studio-progress-mark" aria-hidden="true"></span><div><small>FRAME IS DEVELOPING YOUR FILM</small><strong>{studioStatus}</strong></div></div> : null}
-    <div className="treatment-rule"><span>Storyboard / six frames</span><span>01—06</span></div>
-    <section className="storyboard-sequence" aria-label="Six-shot storyboard">{generation.shots.map((shot, index) => <article className="treatment-shot" key={shot.shotNumber}>
-      <header className="shot-heading"><div><span>0{shot.shotNumber}</span><h2>{shotLabels[index]}</h2></div><time>{shot.startTime}–{shot.endTime} sec</time></header>
-      <figure className="shot-frame" data-format={getPlatformFormat(form.platform)} data-status={shot.imageStatus}>
-        {shot.imageUrl ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${shot.visualDescription}`} fill sizes="(max-width: 750px) 100vw, 50vw" unoptimized /> : shot.imageStatus === "failed" ? <div className="shot-frame-failed"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.imageError ?? "This frame couldn't be rendered."}</p><button type="button" onClick={() => renderShot(shot, generationId ?? undefined)}>Retry frame</button></div> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.visualDescription}</p><small>{shot.imageStatus === "generating" ? "Directing this frame…" : "Waiting for direction"}</small></div>}
-        <figcaption><span>{shot.cameraFraming}</span><span>{shot.lensSuggestion}</span></figcaption>
-      </figure>
-      <div className="shot-treatment"><section className="shot-action"><small>ACTION</small><p>{shot.subjectAction}</p></section><section><small>AUDIO</small><p>{shot.audio}</p></section>{hasDialogue(shot.voiceoverOrDialogue) ? <blockquote><small>VO / DIALOGUE</small><p>“{shot.voiceoverOrDialogue}”</p></blockquote> : null}</div>
-      <details className="shot-generation"><summary>View generation details <span>+</span></summary><div><p><small>PURPOSE</small>{shot.purpose}</p><p><small>ANGLE / MOVEMENT</small>{shot.cameraAngle} · {shot.cameraMovement}</p><p><small>LIGHTING</small>{shot.lighting}</p><p><small>PRODUCTION DESIGN</small>{shot.locationAndProps}</p><p><small>PRODUCT CONTINUITY</small>{shot.productPresence}</p><p className="generation-prompt"><small>IMAGE PROMPT</small>{shot.imagePrompt}</p></div></details>
-    </article>)}</section>
-    <footer className="result-footer"><p>{saved ? "Treatment and frames saved." : "Treatment created. Storage was unavailable for this run."}</p><button className="primary-button" onClick={restart}>Make another film <span>↗</span></button></footer>
-  </main>;
+  if (generation && selectedConcept) return <TreatmentView treatment={{ id: generationId ?? undefined, brief: form, concept: selectedConcept, generation }} phase={phase} saved={saved} currentShot={currentShot} onRetryShot={retryShot} onRestart={restart} />;
 
   if (concepts) return <main className="page concepts-page">
-    <header className="topbar"><button className="wordmark" onClick={() => { setConcepts(null); setSelectedConcept(null); }}>FRAME<span>{"///"}</span></button><span>Creative director</span><button className="new-button" onClick={() => { setConcepts(null); setSelectedConcept(null); setError(""); }}>Edit brief</button></header>
+    <header className="topbar"><button className="wordmark" onClick={() => { setConcepts(null); setSelectedConcept(null); setPhase("idle"); }}>FRAME<span>{"///"}</span></button><span>Creative director</span><button className="new-button" onClick={() => { setConcepts(null); setSelectedConcept(null); setError(""); setPhase("idle"); }}>Edit brief</button></header>
     <section className="concepts-header"><div><p className="eyebrow">Three creative territories</p><h1>Choose the idea<br /><i>worth making.</i></h1></div><p>Each route starts from the same product truth. Select the one that gives your brand the strongest way into culture.</p></section>
-    <div className="concept-grid">{concepts.map((concept, index) => { const selected = selectedConcept === concept; const buildingThis = selected && storyboardLoading; return <article className="concept-card" data-selected={selected} key={`${concept.conceptName}-${index}`}><header><span>0{index + 1}</span><small>{conceptTypes[index]}</small></header><div className="concept-title"><p>Creative territory</p><h2>{concept.conceptName}</h2><strong>{concept.idea}</strong></div><div className="concept-detail concept-hook"><small>THE OPEN</small><p>{concept.hook}</p></div><div className="concept-detail concept-visual"><small>VISUAL WORLD</small><p>{concept.visualWorld}</p></div><details className="concept-more"><summary>Read the full treatment <span>+</span></summary><div><section><small>30-SECOND STORY</small><p>{concept.story}</p></section><section><small>PRODUCT&apos;S ROLE</small><p>{concept.productRole}</p></section><section><small>ENDING</small><p>{concept.ending}</p></section></div></details><button className="concept-select" type="button" aria-pressed={selected} disabled={storyboardLoading} onClick={() => generateStoryboard(concept)}>{buildingThis ? "Building storyboard…" : "Choose this direction"}<span>{buildingThis ? "•••" : "↗"}</span></button></article>; })}</div>
+    <div className="concept-grid">{concepts.map((concept, index) => { const selected = selectedConcept === concept; const buildingThis = selected && storyboardWorking; return <article className="concept-card" data-selected={selected} key={`${concept.conceptName}-${index}`}><header><span>0{index + 1}</span><small>{conceptTypes[index]}</small></header><div className="concept-title"><p>Creative territory</p><h2>{concept.conceptName}</h2><strong>{concept.idea}</strong></div><div className="concept-detail concept-hook"><small>THE OPEN</small><p>{concept.hook}</p></div><div className="concept-detail concept-visual"><small>VISUAL WORLD</small><p>{concept.visualWorld}</p></div><details className="concept-more"><summary>Read the full treatment <span>+</span></summary><div><section><small>30-SECOND STORY</small><p>{concept.story}</p></section><section><small>PRODUCT&apos;S ROLE</small><p>{concept.productRole}</p></section><section><small>ENDING</small><p>{concept.ending}</p></section></div></details><button className="concept-select" type="button" aria-pressed={selected} disabled={storyboardWorking || conceptsGenerating} onClick={() => generateStoryboard(concept)}>{buildingThis ? "Building storyboard…" : "Choose this direction"}<span>{buildingThis ? "•••" : "↗"}</span></button></article>; })}</div>
     {error ? <p className="error concepts-error" role="alert">{error}</p> : null}
-    <footer className="concept-actions"><button className="new-button" type="button" disabled={loading || storyboardLoading} onClick={regenerateConcepts}>{loading ? "Finding new directions…" : "Generate 3 new directions"}</button><small>{studioStatus || (selectedConcept ? `Selected: ${selectedConcept.conceptName}` : "Choose a direction to generate its storyboard")}</small></footer>
+    {conceptsGenerating ? <ConceptLoading elapsed={conceptElapsed} onCancel={cancelConcepts} /> : null}
+    <footer className="concept-actions"><button className="new-button" type="button" disabled={conceptsGenerating || storyboardWorking} onClick={regenerateConcepts}>Generate 3 new directions</button><small>{storyboardWorking ? (phase === "storyboard_generating" ? "Developing the visual world…" : directingCopy[(currentShot ?? 1) - 1]) : selectedConcept ? `Selected: ${selectedConcept.conceptName}` : "Choose a direction to generate its storyboard"}</small></footer>
   </main>;
 
   return <main className="page landing-page">
@@ -240,8 +258,14 @@ export default function Home() {
         <section className="brief-step"><div className="step-heading"><b>04</b><div><small>Platform</small><h3>Where will this ad run?</h3></div></div><div className="choice-grid platform-choices" role="group" aria-label="Platform">{platforms.map((platform) => <button className="choice-chip" type="button" aria-pressed={form.platform === platform} key={platform} onClick={() => setForm({ ...form, platform })}>{platform}</button>)}</div></section>
         <section className="brief-step"><div className="step-heading"><b>05</b><div><small>Visual tone</small><h3>How should it feel?</h3></div><span className="selection-count" id="tone-limit">{form.visualTones.length} / 3</span></div><div className="choice-grid tone-choices" role="group" aria-label="Visual tone" aria-describedby="tone-limit">{visualToneOptions.map((tone) => { const selected = form.visualTones.includes(tone); const atLimit = form.visualTones.length === 3; return <button className="choice-chip" type="button" aria-pressed={selected} disabled={!selected && atLimit} key={tone} onClick={() => toggleVisualTone(tone)}>{tone}</button>; })}</div></section>
         {error ? <p className="error" role="alert">{error}</p> : null}
-        <div className="form-action"><button className="primary-button" disabled={loading}>{loading ? "Finding three ideas…" : <>Develop concepts <span>↗</span></>}</button><small>3 distinct creative directions</small></div>
+        <div className="form-action"><button className="primary-button" disabled={conceptsGenerating}>{conceptsGenerating ? "Developing concepts…" : <>Develop concepts <span>↗</span></>}</button><small>3 distinct creative directions</small></div>
       </form>
     </section>
+    {conceptsGenerating ? <ConceptLoading elapsed={conceptElapsed} onCancel={cancelConcepts} /> : null}
   </main>;
+}
+
+function ConceptLoading({ elapsed, onCancel }: { elapsed: number; onCancel: () => void }) {
+  const status = elapsed < 4 ? ["READING YOUR BRIEF", "Finding the strongest product and audience tension."] : elapsed < 9 ? ["DRAFTING CREATIVE TERRITORIES", "Exploring different ways to dramatize the idea."] : ["BUILDING YOUR OPTIONS", "Turning the strongest directions into three concepts."];
+  return <section className="concept-loading" role="status" aria-live="polite" aria-busy="true"><span className="loading-frame" aria-hidden="true">FRAME / CD</span><div><small>{status[0]}</small><strong>{status[1]}</strong>{elapsed >= 10 ? <p>Good ideas can take a moment — this usually finishes within 45 seconds.</p> : null}</div><button type="button" onClick={onCancel}>Back to brief</button></section>;
 }

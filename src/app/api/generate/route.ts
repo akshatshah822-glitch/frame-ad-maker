@@ -13,8 +13,8 @@ type ModelGeneration = { title: string; duration: string; visualBible: VisualBib
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"];
 const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"];
 const conceptFields = ["conceptName", "idea", "hook", "story", "productRole", "visualWorld", "ending"] as const;
-const stringShotFields = ["purpose", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "voiceoverOrDialogue", "productPresence", "locationAndProps"] as const;
-const requiredShotContentFields = ["visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "productPresence", "locationAndProps"] as const;
+const stringShotFields = ["purpose", "displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "voiceoverOrDialogue", "productPresence", "locationAndProps"] as const;
+const requiredShotContentFields = ["displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "productPresence", "locationAndProps"] as const;
 const visualBibleStringFields = ["subject", "product", "location", "lighting", "cinematography", "texture"] as const;
 const shotStructure = [
   { shotNumber: 1, startTime: 0, endTime: 3, purpose: "HOOK" },
@@ -60,6 +60,7 @@ const outputSchema = {
         properties: {
           shotNumber: { type: "integer" }, startTime: { type: "integer" }, endTime: { type: "integer" },
           purpose: { type: "string", enum: shotStructure.map((shot) => shot.purpose) },
+          displayVisual: { type: "string" }, displayCamera: { type: "string" }, displayAction: { type: "string" },
           visualDescription: { type: "string" }, subjectAction: { type: "string" }, cameraFraming: { type: "string" },
           cameraAngle: { type: "string" }, lensSuggestion: { type: "string" }, cameraMovement: { type: "string" },
           lighting: { type: "string" }, audio: { type: "string" }, voiceoverOrDialogue: { type: "string" },
@@ -161,6 +162,10 @@ VISUAL BIBLE
 - Avoid plastic skin, inconsistent faces, random background objects, unnecessary neon, excessive bokeh, inconsistent wardrobe, inconsistent product shape, warped jewellery or products, and text inside images.
 
 SHOT DIRECTION
+- displayVisual must be one plain, filmable sentence of roughly 8–20 words.
+- displayCamera must be one concise instruction combining framing, lens, and movement, such as "85mm close-up · slow push-in".
+- displayAction must be one concise, physical action sentence.
+- Keep the detailed production fields complete. The display fields are summaries for a producer, not replacements.
 - For every shot, locationAndProps must specify only the set dressing and props visible in that frame while staying inside the shared location logic.
 - Vary action, framing, angle, lens, and movement so the sequence progresses visually.
 - Do not write final image prompts. The application constructs them from the shared Visual Bible and shot direction.

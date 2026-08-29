@@ -98,13 +98,15 @@ FRAME should feel like a focused creative director's workbench: editorial, preci
 - Use two columns above `750px` and one column below it.
 - Each shot begins with a dominant `16:9` frame well with a sharp ink border and `6px` blueprint offset shadow (`4px` on mobile).
 - When a real image URL exists, fill the frame with the image using cover cropping. Never imply that a visual placeholder is a generated image.
-- Keep shot number, narrative role, and timestamp immediately above the frame.
-- Keep framing and lens as compact overlays inside the bottom edge of the frame.
-- Below the frame, show action first, then audio, followed by VO/dialogue only when present.
-- Use native `<details>` for the secondary control labelled `View generation details`.
-- Keep purpose, angle/movement, lighting, production design, product continuity, and the raw image prompt inside the collapsed generation-details area.
+- Place the image first, then shot number, narrative role, timestamp, Visual, Camera, and Action.
+- Default shot copy is one concise visual instruction, one concise camera instruction, and one concise physical action.
+- Use native `<details>` for the secondary control labelled `View shot details`.
+- Keep the full visual, purpose, framing, angle/movement, lens, lighting, production design, product continuity, audio, dialogue, and raw image prompt inside collapsed shot details.
 - Do not expose raw image-generation prompts by default.
 - Do not add shot-directing controls until that workflow is explicitly designed.
 - Image rendering states stay inside each frame: waiting, directing, completed image, or a local failure with an explicit `Retry frame` action.
 - During the six-frame render queue, use one compact studio-status strip with real stage copy. Never display invented percentages.
 - Match the visible frame shape to platform intent: `9:16` for Reels, `4:5` for Meta Ads, and `16:9` for YouTube and TV / OTT.
+- Completed treatments lead with Copy treatment, then Download PDF and Share link. Make another film is tertiary.
+- All important controls use an effective minimum hit area of `44px` on touch screens.
+- Loading and completion copy derive from one phase. A ready treatment never retains directing language.
