@@ -1,0 +1,31 @@
+{
+  "treatmentId": "j578ghnpfa9dwjdtypjks1f6tx8dd3n5",
+  "selectedClips": [
+    {
+      "shotNumber": 1,
+      "duration": 3,
+      "videoUrl": "https://valiant-cod-559.convex.cloud/api/storage/b4233f08-14e8-4207-94f8-18cb6d402ef4",
+      "finalCredits": 36
+    },
+    {
+      "shotNumber": 4,
+      "duration": 6,
+      "videoUrl": "https://valiant-cod-559.convex.cloud/api/storage/3c1a7da5-21d9-4748-b6ae-c3247de2b5d1",
+      "finalCredits": 72
+    },
+    {
+      "shotNumber": 6,
+      "duration": 5,
+      "videoUrl": "https://valiant-cod-559.convex.cloud/api/storage/771c15d3-076d-480c-8803-11839fca8ec3",
+      "finalCredits": 60
+    }
+  ],
+  "storyboardKeyframes": [
+    "https://valiant-cod-559.convex.cloud/api/storage/7dd60ac0-4e33-4392-8ee2-0c6fecc877dc",
+    "https://valiant-cod-559.convex.cloud/api/storage/8195f41e-1cdf-434d-8fac-349d28916a27",
+    "https://valiant-cod-559.convex.cloud/api/storage/825f980a-e4b6-4a9f-ac90-2a32a01cece2",
+    "https://valiant-cod-559.convex.cloud/api/storage/4fb1d23c-3833-43e9-8dfa-fca03519f050",
+    "https://valiant-cod-559.convex.cloud/api/storage/ecc06885-b1de-4333-87a3-ed77cc8ba3b8",
+    "https://valiant-cod-559.convex.cloud/api/storage/95614c55-f079-4ce3-957a-fd389da3aa16"
+  ]
+}

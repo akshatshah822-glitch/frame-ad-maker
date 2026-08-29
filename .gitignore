@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# reproducible launch-ad working media; keep the final MP4 and reports
+artifacts/frame-launch/work/
