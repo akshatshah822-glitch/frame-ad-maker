@@ -1,0 +1,188 @@
+"use client";
+
+import { FormEvent, useState } from "react";
+import Image from "next/image";
+
+type Generation = {
+  title: string;
+  duration: string;
+  visualBible: {
+    subject: string; product: string; location: string; colorPalette: string[];
+    lighting: string; cinematography: string; texture: string; continuityLocks: string[];
+  };
+  shots: {
+    shotNumber: number; startTime: number; endTime: number; purpose: string; visualDescription: string;
+    subjectAction: string; cameraFraming: string; cameraAngle: string; lensSuggestion: string;
+    cameraMovement: string; lighting: string; audio: string; voiceoverOrDialogue: string;
+    productPresence: string; locationAndProps: string; imagePrompt: string; imageUrl?: string;
+  }[];
+};
+
+type Concept = {
+  conceptName: string;
+  idea: string;
+  hook: string;
+  story: string;
+  productRole: string;
+  visualWorld: string;
+  ending: string;
+};
+
+const conceptTypes = ["Human / Emotional", "Product / Craft-led", "Unexpected / Conceptual"] as const;
+const shotLabels = ["Hook", "Tension", "Product", "Proof", "Payoff", "Brand"] as const;
+
+function hasDialogue(value: string) {
+  return value.trim().length > 0 && !/^(none|n\/a|no dialogue|no voiceover|silent)$/i.test(value.trim());
+}
+
+const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"] as const;
+const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"] as const;
+
+const campaignDirections = [
+  { category: "Beauty & Skincare", number: "01", concept: "The mirror test", hook: "Your glow shouldn’t disappear when the filter does.", tone: "Honest · tactile · assured", visual: "Morning light. Bare skin. One satisfying product ritual captured in macro.", palette: "rose" },
+  { category: "Food & Beverages", number: "02", concept: "Crave the first pour", hook: "You’ll hear the refreshment before you taste it.", tone: "Sensory · bright · immediate", visual: "Cold glass. Condensation. A slow pour that becomes the soundtrack.", palette: "citrus" },
+  { category: "Snacks", number: "03", concept: "Break the boring", hook: "Your 4 PM meeting deserves a better crunch.", tone: "Quick · playful · knowing", visual: "A dull desk snaps into colour on the first bite. Crumbs become confetti.", palette: "berry" },
+  { category: "Fashion", number: "04", concept: "Only yours", hook: "Seen everywhere? Then it was never really yours.", tone: "Selective · expressive · cinematic", visual: "One silver piece moves through a crowd of identical silhouettes.", palette: "silver" },
+  { category: "Wellness", number: "05", concept: "A ritual that fits", hook: "Wellness shouldn’t feel like another task.", tone: "Calm · human · grounded", visual: "A real morning in fragments: water, breath, sunlight, product, out the door.", palette: "sage" },
+] as const;
+
+const initialForm = {
+  brandProduct: "Noor — one-of-one 925 sterling silver jewellery",
+  audience: "Design-conscious women aged 25–40 who value original pieces",
+  proposition: "Every piece is made only once. No two are ever the same.",
+  platform: "Instagram / Reels",
+  visualTones: ["Cinematic"] as string[],
+};
+
+export default function Home() {
+  const [form, setForm] = useState(initialForm);
+  const [generation, setGeneration] = useState<Generation | null>(null);
+  const [concepts, setConcepts] = useState<Concept[] | null>(null);
+  const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [storyboardLoading, setStoryboardLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showcaseIndex, setShowcaseIndex] = useState(0);
+  const showcase = campaignDirections[showcaseIndex];
+
+  function toggleVisualTone(tone: string) {
+    setForm((current) => {
+      const selected = current.visualTones.includes(tone);
+      if (selected) return { ...current, visualTones: current.visualTones.filter((item) => item !== tone) };
+      if (current.visualTones.length === 3) return current;
+      return { ...current, visualTones: [...current.visualTones, tone] };
+    });
+  }
+
+  async function requestConcepts() {
+    setError("");
+    if (form.visualTones.length === 0) {
+      setError("Choose at least one visual tone.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch("/api/concepts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Something went wrong.");
+      if (!Array.isArray(result.concepts) || result.concepts.length !== 3) throw new Error("The concepts came back incomplete. Please generate them again.");
+      setConcepts(result.concepts);
+      setSelectedConcept(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateConcepts(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await requestConcepts();
+  }
+
+  async function regenerateConcepts() {
+    setSelectedConcept(null);
+    await requestConcepts();
+  }
+
+  async function generateStoryboard(concept: Concept) {
+    setSelectedConcept(concept);
+    setStoryboardLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brandProduct: form.brandProduct,
+          audience: form.audience,
+          proposition: form.proposition,
+          platform: form.platform,
+          visualTones: form.visualTones,
+          selectedConcept: concept,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Something went wrong.");
+      setGeneration(result.generation);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setStoryboardLoading(false);
+    }
+  }
+
+  if (generation) return <main className="page result-page">
+    <header className="topbar"><button className="wordmark" onClick={() => setGeneration(null)}>FRAME<span>{"///"}</span></button><span>30 sec ad maker</span><button className="new-button" onClick={() => setGeneration(null)}>Start over</button></header>
+    <section className="treatment-header"><p className="eyebrow">Approved creative direction</p><div><span>Concept name</span><h1>{selectedConcept?.conceptName ?? generation.title}</h1><p>{selectedConcept?.idea ?? generation.title}</p></div><aside><small>FORMAT</small><strong>{generation.duration}</strong><small>PLATFORM</small><strong>{form.platform}</strong></aside></section>
+    <div className="treatment-rule"><span>Storyboard / six frames</span><span>01—06</span></div>
+    <section className="storyboard-sequence" aria-label="Six-shot storyboard">{generation.shots.map((shot, index) => <article className="treatment-shot" key={shot.shotNumber}>
+      <header className="shot-heading"><div><span>0{shot.shotNumber}</span><h2>{shotLabels[index]}</h2></div><time>{shot.startTime}–{shot.endTime} sec</time></header>
+      <figure className="shot-frame">
+        {shot.imageUrl ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${shot.visualDescription}`} fill sizes="(max-width: 750px) 100vw, 50vw" unoptimized /> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.visualDescription}</p><small>Visual direction ready for image generation</small></div>}
+        <figcaption><span>{shot.cameraFraming}</span><span>{shot.lensSuggestion}</span></figcaption>
+      </figure>
+      <div className="shot-treatment"><section className="shot-action"><small>ACTION</small><p>{shot.subjectAction}</p></section><section><small>AUDIO</small><p>{shot.audio}</p></section>{hasDialogue(shot.voiceoverOrDialogue) ? <blockquote><small>VO / DIALOGUE</small><p>“{shot.voiceoverOrDialogue}”</p></blockquote> : null}</div>
+      <details className="shot-generation"><summary>View generation details <span>+</span></summary><div><p><small>PURPOSE</small>{shot.purpose}</p><p><small>ANGLE / MOVEMENT</small>{shot.cameraAngle} · {shot.cameraMovement}</p><p><small>LIGHTING</small>{shot.lighting}</p><p><small>PRODUCTION DESIGN</small>{shot.locationAndProps}</p><p><small>PRODUCT CONTINUITY</small>{shot.productPresence}</p><p className="generation-prompt"><small>IMAGE PROMPT</small>{shot.imagePrompt}</p></div></details>
+    </article>)}</section>
+    <footer className="result-footer"><p>Saved to your generation history.</p><button className="primary-button" onClick={() => setGeneration(null)}>Make another film <span>↗</span></button></footer>
+  </main>;
+
+  if (concepts) return <main className="page concepts-page">
+    <header className="topbar"><button className="wordmark" onClick={() => { setConcepts(null); setSelectedConcept(null); }}>FRAME<span>{"///"}</span></button><span>Creative director</span><button className="new-button" onClick={() => { setConcepts(null); setSelectedConcept(null); setError(""); }}>Edit brief</button></header>
+    <section className="concepts-header"><div><p className="eyebrow">Three creative territories</p><h1>Choose the idea<br /><i>worth making.</i></h1></div><p>Each route starts from the same product truth. Select the one that gives your brand the strongest way into culture.</p></section>
+    <div className="concept-grid">{concepts.map((concept, index) => { const selected = selectedConcept === concept; const buildingThis = selected && storyboardLoading; return <article className="concept-card" data-selected={selected} key={`${concept.conceptName}-${index}`}><header><span>0{index + 1}</span><small>{conceptTypes[index]}</small></header><div className="concept-title"><p>Creative territory</p><h2>{concept.conceptName}</h2><strong>{concept.idea}</strong></div><div className="concept-detail concept-hook"><small>THE OPEN</small><p>{concept.hook}</p></div><div className="concept-detail concept-visual"><small>VISUAL WORLD</small><p>{concept.visualWorld}</p></div><details className="concept-more"><summary>Read the full treatment <span>+</span></summary><div><section><small>30-SECOND STORY</small><p>{concept.story}</p></section><section><small>PRODUCT&apos;S ROLE</small><p>{concept.productRole}</p></section><section><small>ENDING</small><p>{concept.ending}</p></section></div></details><button className="concept-select" type="button" aria-pressed={selected} disabled={storyboardLoading} onClick={() => generateStoryboard(concept)}>{buildingThis ? "Building storyboard…" : "Choose this direction"}<span>{buildingThis ? "•••" : "↗"}</span></button></article>; })}</div>
+    {error ? <p className="error concepts-error" role="alert">{error}</p> : null}
+    <footer className="concept-actions"><button className="new-button" type="button" disabled={loading || storyboardLoading} onClick={regenerateConcepts}>{loading ? "Finding new directions…" : "Generate 3 new directions"}</button><small>{selectedConcept ? `Selected: ${selectedConcept.conceptName}` : "Choose a direction to generate its storyboard"}</small></footer>
+  </main>;
+
+  return <main className="page landing-page">
+    <header className="topbar"><span className="wordmark">FRAME<span>{"///"}</span></span><span>30 sec ad maker</span><span className="status-dot">Studio ready</span></header>
+    <section className="hero">
+      <div className="hero-copy"><p className="eyebrow">Audience-aware scripts. Shoot-ready shots.</p><h1>Ads that know<br /><i>who they&apos;re for.</i></h1><p className="intro">FRAME turns your product, audience, and single-minded proposition into one focused 30-second commercial—not another generic AI ad.</p><div className="brief-recipe" aria-label="How Frame creates your ad"><span><b>01</b> Your product</span><span><b>02</b> Your audience</span><span><b>03</b> One thing to remember</span></div><a className="text-link" href="#brief">Create my shoot-ready ad <span>↓</span></a></div>
+      <div className="campaign-carousel" data-palette={showcase.palette} aria-label="Example campaign directions">
+        <div className="carousel-top"><span>CAMPAIGN DIRECTION / {showcase.number}</span><div><button type="button" aria-label="Previous campaign direction" onClick={() => setShowcaseIndex((showcaseIndex + campaignDirections.length - 1) % campaignDirections.length)}>←</button><span>{showcase.number} / 05</span><button type="button" aria-label="Next campaign direction" onClick={() => setShowcaseIndex((showcaseIndex + 1) % campaignDirections.length)}>→</button></div></div>
+        <div className="campaign-visual" aria-hidden="true"><span className="visual-word">{showcase.concept}</span><div className="viewfinder"><i></i><i></i><i></i><i></i></div><b>{showcase.category.split(" ")[0]}</b></div>
+        <div className="campaign-copy"><div><small>OPENING HOOK</small><blockquote>“{showcase.hook}”</blockquote></div><div className="direction-details"><p><small>TONE</small>{showcase.tone}</p><p><small>SHOT TREATMENT</small>{showcase.visual}</p></div></div>
+        <div className="carousel-tabs" role="tablist" aria-label="Choose an example category">{campaignDirections.map((direction, index) => <button type="button" role="tab" aria-selected={index === showcaseIndex} key={direction.category} onClick={() => setShowcaseIndex(index)}><span>{direction.number}</span>{direction.category}</button>)}</div>
+      </div>
+    </section>
+    <section className="brief-section" id="brief">
+      <div className="brief-intro"><p className="eyebrow">The brief</p><h2>Five answers.<br />One filmable idea.</h2><p>Focus the message, choose the screen, and set the visual character.</p></div>
+      <form className="brief-card" onSubmit={generateConcepts}>
+        <div className="section-label"><span>BR</span><h2>Creative brief</h2><em>5 decisions</em></div>
+        <section className="brief-step"><div className="step-heading"><b>01</b><div><small>Brand / Product</small><h3>What are we advertising?</h3></div></div><textarea required value={form.brandProduct} onChange={(event) => setForm({ ...form, brandProduct: event.target.value })} rows={2} aria-label="What are we advertising?" /></section>
+        <section className="brief-step"><div className="step-heading"><b>02</b><div><small>Audience</small><h3>Who specifically needs to care?</h3></div></div><input required maxLength={160} value={form.audience} onChange={(event) => setForm({ ...form, audience: event.target.value })} aria-label="Who specifically needs to care?" /></section>
+        <section className="brief-step"><div className="step-heading"><b>03</b><div><small>Single-minded proposition</small><h3>After watching this ad, what ONE thing should they remember?</h3></div></div><textarea required value={form.proposition} onChange={(event) => setForm({ ...form, proposition: event.target.value })} rows={2} aria-label="What one thing should they remember?" /></section>
+        <section className="brief-step"><div className="step-heading"><b>04</b><div><small>Platform</small><h3>Where will this ad run?</h3></div></div><div className="choice-grid platform-choices" role="group" aria-label="Platform">{platforms.map((platform) => <button className="choice-chip" type="button" aria-pressed={form.platform === platform} key={platform} onClick={() => setForm({ ...form, platform })}>{platform}</button>)}</div></section>
+        <section className="brief-step"><div className="step-heading"><b>05</b><div><small>Visual tone</small><h3>How should it feel?</h3></div><span className="selection-count" id="tone-limit">{form.visualTones.length} / 3</span></div><div className="choice-grid tone-choices" role="group" aria-label="Visual tone" aria-describedby="tone-limit">{visualToneOptions.map((tone) => { const selected = form.visualTones.includes(tone); const atLimit = form.visualTones.length === 3; return <button className="choice-chip" type="button" aria-pressed={selected} disabled={!selected && atLimit} key={tone} onClick={() => toggleVisualTone(tone)}>{tone}</button>; })}</div></section>
+        {error ? <p className="error" role="alert">{error}</p> : null}
+        <div className="form-action"><button className="primary-button" disabled={loading}>{loading ? "Finding three ideas…" : <>Generate concepts <span>↗</span></>}</button><small>3 distinct creative directions</small></div>
+      </form>
+    </section>
+  </main>;
+}
