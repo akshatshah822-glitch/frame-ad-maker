@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import type { Concept } from "@/lib/types";
+import { supportedPlatforms } from "@/lib/image-prompt";
+import { classifyOpenAIError } from "@/lib/openai-error";
 
 type ConceptBrief = {
   brandProduct?: string;
@@ -9,17 +12,8 @@ type ConceptBrief = {
   platform?: string;
 };
 
-type Concept = {
-  conceptName: string;
-  idea: string;
-  hook: string;
-  story: string;
-  productRole: string;
-  visualWorld: string;
-  ending: string;
-};
-
 const conceptFields = ["conceptName", "idea", "hook", "story", "productRole", "visualWorld", "ending"] as const;
+const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"];
 
 const conceptsSchema = {
   type: "object",
@@ -51,7 +45,8 @@ const conceptsSchema = {
 function isConcept(value: unknown): value is Concept {
   if (!value || typeof value !== "object") return false;
   const concept = value as Record<string, unknown>;
-  return conceptFields.every((field) => typeof concept[field] === "string" && concept[field].trim().length > 0);
+  return conceptFields.every((field) => typeof concept[field] === "string" && concept[field].trim().length > 0)
+    && (concept.conceptName as string).trim().split(/\s+/).length <= 5;
 }
 
 function parseConcepts(outputText: string): Concept[] | null {
@@ -83,6 +78,9 @@ export async function POST(request: Request) {
   }
   if (visualTones.length > 3) {
     return NextResponse.json({ error: "Choose no more than three visual tones." }, { status: 400 });
+  }
+  if (!supportedPlatforms.includes(platform) || visualTones.some((tone) => !visualToneOptions.includes(tone))) {
+    return NextResponse.json({ error: "Choose the available platform and visual tone options." }, { status: 400 });
   }
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: "Add OPENAI_API_KEY before generating concepts." }, { status: 500 });
@@ -126,6 +124,8 @@ RULES
 
 The three concepts must be fundamentally different.
 
+They must not reuse the same central device, setting, opening-hook mechanism, narrative arc, or product demonstration with cosmetic changes. If two ideas could be described by the same one-sentence device, replace the weaker one before responding.
+
 Avoid generic lifestyle advertising, a smiling model holding the product, meaningless slow motion, generic luxury imagery, floating products, random metaphors, unnecessary text overlays, and exposition-heavy voiceover.
 
 Prioritize visual storytelling. Each concept should still largely work with sound off. Every concept must make the single-minded proposition impossible to miss. Do not create a script, shot list, storyboard, or images.`,
@@ -139,10 +139,10 @@ Platform: ${platform}`,
     });
   } catch (error) {
     console.error("OpenAI concept generation failed", error);
-    if ((error as { status?: number }).status === 429) {
-      return NextResponse.json({ error: "OpenAI needs API credits before it can create concepts. Add billing, then try again." }, { status: 402 });
-    }
-    return NextResponse.json({ error: "The creative director could not generate concepts. Please try again." }, { status: 502 });
+    const kind = classifyOpenAIError(error);
+    if (kind === "rate_limit") return NextResponse.json({ error: "We're receiving too many generation requests. Try again shortly." }, { status: 429 });
+    if (kind === "quota" || kind === "configuration") return NextResponse.json({ error: "Concept generation is not available for this project right now." }, { status: 503 });
+    return NextResponse.json({ error: "We couldn't develop the concepts. Try again." }, { status: 502 });
   }
 
   const concepts = parseConcepts(response.output_text);

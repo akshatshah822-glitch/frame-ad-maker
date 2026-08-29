@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FRAME
 
-## Getting Started
+FRAME turns a simple brand brief into three creative directions, one selected 30-second storyboard, a shared Visual Bible, and six generated commercial frames.
 
-First, run the development server:
+## Product flow
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```text
+Brief
+→ 3 creative directions
+→ Select one
+→ Visual Bible + 6-shot storyboard
+→ 6 image prompts
+→ 6 generated frames
+→ Final treatment
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Copy `.env.local.example` to `.env.local`.
+2. Add an OpenAI API key with access to `gpt-5-mini` and `gpt-image-2`.
+3. Add the Convex deployment URL.
+4. Install dependencies with `npm install`.
+5. Run `npx convex dev` to deploy Convex functions.
+6. Run `npm run dev` and open `http://localhost:3000`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Required variables:
 
-## Learn More
+```bash
+OPENAI_API_KEY=
+NEXT_PUBLIC_CONVEX_URL=
+```
 
-To learn more about Next.js, take a look at the following resources:
+`OPENAI_API_KEY` is used only by Next.js server routes. Never expose it through a `NEXT_PUBLIC_` variable.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Models and image storage
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Concepts and storyboards: `gpt-5-mini` through the OpenAI Responses API with strict JSON schemas.
+- Storyboard frames: `gpt-image-2` through the OpenAI Image API, medium quality JPEG.
+- Images: uploaded to Convex File Storage. The returned file URLs remain available until the stored files are deleted.
+- If image storage fails after rendering, that browser session receives an in-memory data URL so the successful frame is still shown. That fallback does not survive refresh.
 
-## Deploy on Vercel
+## Commands
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run lint
+npx tsc --noEmit
+npm run build
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment
+
+Configure `OPENAI_API_KEY` and `NEXT_PUBLIC_CONVEX_URL` in Vercel. Deploy Convex functions before deploying the Next.js application so image upload and record-update functions exist in production.

@@ -1,32 +1,9 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import Image from "next/image";
-
-type Generation = {
-  title: string;
-  duration: string;
-  visualBible: {
-    subject: string; product: string; location: string; colorPalette: string[];
-    lighting: string; cinematography: string; texture: string; continuityLocks: string[];
-  };
-  shots: {
-    shotNumber: number; startTime: number; endTime: number; purpose: string; visualDescription: string;
-    subjectAction: string; cameraFraming: string; cameraAngle: string; lensSuggestion: string;
-    cameraMovement: string; lighting: string; audio: string; voiceoverOrDialogue: string;
-    productPresence: string; locationAndProps: string; imagePrompt: string; imageUrl?: string;
-  }[];
-};
-
-type Concept = {
-  conceptName: string;
-  idea: string;
-  hook: string;
-  story: string;
-  productRole: string;
-  visualWorld: string;
-  ending: string;
-};
+import { getPlatformFormat } from "@/lib/image-prompt";
+import type { Brief, Concept, Generation, Shot } from "@/lib/types";
 
 const conceptTypes = ["Human / Emotional", "Product / Craft-led", "Unexpected / Conceptual"] as const;
 const shotLabels = ["Hook", "Tension", "Product", "Proof", "Payoff", "Brand"] as const;
@@ -46,13 +23,22 @@ const campaignDirections = [
   { category: "Wellness", number: "05", concept: "A ritual that fits", hook: "Wellness shouldn’t feel like another task.", tone: "Calm · human · grounded", visual: "A real morning in fragments: water, breath, sunlight, product, out the door.", palette: "sage" },
 ] as const;
 
-const initialForm = {
-  brandProduct: "Noor — one-of-one 925 sterling silver jewellery",
-  audience: "Design-conscious women aged 25–40 who value original pieces",
-  proposition: "Every piece is made only once. No two are ever the same.",
+const initialForm: Brief = {
+  brandProduct: "",
+  audience: "",
+  proposition: "",
   platform: "Instagram / Reels",
   visualTones: ["Cinematic"] as string[],
 };
+
+const directingCopy = [
+  "Directing the opening hook…",
+  "Lighting the tension…",
+  "Framing the product reveal…",
+  "Building the proof…",
+  "Capturing the payoff…",
+  "Finishing the brand frame…",
+] as const;
 
 export default function Home() {
   const [form, setForm] = useState(initialForm);
@@ -61,9 +47,14 @@ export default function Home() {
   const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
   const [loading, setLoading] = useState(false);
   const [storyboardLoading, setStoryboardLoading] = useState(false);
+  const [studioStatus, setStudioStatus] = useState("");
+  const [generationId, setGenerationId] = useState<string | null>(null);
+  const [saved, setSaved] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const [showcaseIndex, setShowcaseIndex] = useState(0);
   const showcase = campaignDirections[showcaseIndex];
+  const generationRunRef = useRef(false);
+  const runIdRef = useRef(0);
 
   function toggleVisualTone(tone: string) {
     setForm((current) => {
@@ -109,9 +100,58 @@ export default function Home() {
     await requestConcepts();
   }
 
+  function updateShot(shotNumber: number, update: Partial<Shot>) {
+    setGeneration((current) => current ? {
+      ...current,
+      shots: current.shots.map((shot) => shot.shotNumber === shotNumber ? { ...shot, ...update } : shot),
+    } : current);
+  }
+
+  async function renderShot(shot: Shot, savedGenerationId?: string) {
+    updateShot(shot.shotNumber, { imageStatus: "generating", imageError: undefined });
+    setStudioStatus(directingCopy[shot.shotNumber - 1]);
+    try {
+      const response = await fetch("/api/images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imagePrompt: shot.imagePrompt,
+          platform: form.platform,
+          shotNumber: shot.shotNumber,
+          generationId: savedGenerationId,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "This frame couldn't be rendered.");
+      updateShot(shot.shotNumber, {
+        imageStatus: "complete",
+        imageUrl: result.imageUrl,
+        imageStorageId: result.imageStorageId,
+        imageError: undefined,
+      });
+    } catch (err) {
+      updateShot(shot.shotNumber, {
+        imageStatus: "failed",
+        imageError: err instanceof Error ? err.message : "This frame couldn't be rendered.",
+      });
+    }
+  }
+
+  async function renderAllShots(storyboard: Generation, runId: number, savedGenerationId?: string) {
+    for (const shot of storyboard.shots) {
+      if (runIdRef.current !== runId) return;
+      await renderShot(shot, savedGenerationId);
+    }
+    if (runIdRef.current === runId) setStudioStatus("");
+  }
+
   async function generateStoryboard(concept: Concept) {
+    if (generationRunRef.current) return;
+    generationRunRef.current = true;
+    const runId = ++runIdRef.current;
     setSelectedConcept(concept);
     setStoryboardLoading(true);
+    setStudioStatus("Developing the visual world…");
     setError("");
     try {
       const response = await fetch("/api/generate", {
@@ -129,27 +169,46 @@ export default function Home() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Something went wrong.");
       setGeneration(result.generation);
+      setGenerationId(result.generationId ?? null);
+      setSaved(result.saved);
+      setStoryboardLoading(false);
+      await renderAllShots(result.generation, runId, result.generationId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setStoryboardLoading(false);
+      setStudioStatus("");
+      generationRunRef.current = false;
     }
   }
 
+  function restart() {
+    runIdRef.current += 1;
+    generationRunRef.current = false;
+    setGeneration(null);
+    setConcepts(null);
+    setSelectedConcept(null);
+    setGenerationId(null);
+    setSaved(null);
+    setStudioStatus("");
+    setError("");
+  }
+
   if (generation) return <main className="page result-page">
-    <header className="topbar"><button className="wordmark" onClick={() => setGeneration(null)}>FRAME<span>{"///"}</span></button><span>30 sec ad maker</span><button className="new-button" onClick={() => setGeneration(null)}>Start over</button></header>
+    <header className="topbar"><button className="wordmark" onClick={restart}>FRAME<span>{"///"}</span></button><span>30 sec ad maker</span><button className="new-button" onClick={restart}>Start over</button></header>
     <section className="treatment-header"><p className="eyebrow">Approved creative direction</p><div><span>Concept name</span><h1>{selectedConcept?.conceptName ?? generation.title}</h1><p>{selectedConcept?.idea ?? generation.title}</p></div><aside><small>FORMAT</small><strong>{generation.duration}</strong><small>PLATFORM</small><strong>{form.platform}</strong></aside></section>
+    {studioStatus ? <div className="studio-progress" role="status"><span className="studio-progress-mark" aria-hidden="true"></span><div><small>FRAME IS DEVELOPING YOUR FILM</small><strong>{studioStatus}</strong></div></div> : null}
     <div className="treatment-rule"><span>Storyboard / six frames</span><span>01—06</span></div>
     <section className="storyboard-sequence" aria-label="Six-shot storyboard">{generation.shots.map((shot, index) => <article className="treatment-shot" key={shot.shotNumber}>
       <header className="shot-heading"><div><span>0{shot.shotNumber}</span><h2>{shotLabels[index]}</h2></div><time>{shot.startTime}–{shot.endTime} sec</time></header>
-      <figure className="shot-frame">
-        {shot.imageUrl ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${shot.visualDescription}`} fill sizes="(max-width: 750px) 100vw, 50vw" unoptimized /> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.visualDescription}</p><small>Visual direction ready for image generation</small></div>}
+      <figure className="shot-frame" data-format={getPlatformFormat(form.platform)} data-status={shot.imageStatus}>
+        {shot.imageUrl ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${shot.visualDescription}`} fill sizes="(max-width: 750px) 100vw, 50vw" unoptimized /> : shot.imageStatus === "failed" ? <div className="shot-frame-failed"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.imageError ?? "This frame couldn't be rendered."}</p><button type="button" onClick={() => renderShot(shot, generationId ?? undefined)}>Retry frame</button></div> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.visualDescription}</p><small>{shot.imageStatus === "generating" ? "Directing this frame…" : "Waiting for direction"}</small></div>}
         <figcaption><span>{shot.cameraFraming}</span><span>{shot.lensSuggestion}</span></figcaption>
       </figure>
       <div className="shot-treatment"><section className="shot-action"><small>ACTION</small><p>{shot.subjectAction}</p></section><section><small>AUDIO</small><p>{shot.audio}</p></section>{hasDialogue(shot.voiceoverOrDialogue) ? <blockquote><small>VO / DIALOGUE</small><p>“{shot.voiceoverOrDialogue}”</p></blockquote> : null}</div>
       <details className="shot-generation"><summary>View generation details <span>+</span></summary><div><p><small>PURPOSE</small>{shot.purpose}</p><p><small>ANGLE / MOVEMENT</small>{shot.cameraAngle} · {shot.cameraMovement}</p><p><small>LIGHTING</small>{shot.lighting}</p><p><small>PRODUCTION DESIGN</small>{shot.locationAndProps}</p><p><small>PRODUCT CONTINUITY</small>{shot.productPresence}</p><p className="generation-prompt"><small>IMAGE PROMPT</small>{shot.imagePrompt}</p></div></details>
     </article>)}</section>
-    <footer className="result-footer"><p>Saved to your generation history.</p><button className="primary-button" onClick={() => setGeneration(null)}>Make another film <span>↗</span></button></footer>
+    <footer className="result-footer"><p>{saved ? "Treatment and frames saved." : "Treatment created. Storage was unavailable for this run."}</p><button className="primary-button" onClick={restart}>Make another film <span>↗</span></button></footer>
   </main>;
 
   if (concepts) return <main className="page concepts-page">
@@ -157,7 +216,7 @@ export default function Home() {
     <section className="concepts-header"><div><p className="eyebrow">Three creative territories</p><h1>Choose the idea<br /><i>worth making.</i></h1></div><p>Each route starts from the same product truth. Select the one that gives your brand the strongest way into culture.</p></section>
     <div className="concept-grid">{concepts.map((concept, index) => { const selected = selectedConcept === concept; const buildingThis = selected && storyboardLoading; return <article className="concept-card" data-selected={selected} key={`${concept.conceptName}-${index}`}><header><span>0{index + 1}</span><small>{conceptTypes[index]}</small></header><div className="concept-title"><p>Creative territory</p><h2>{concept.conceptName}</h2><strong>{concept.idea}</strong></div><div className="concept-detail concept-hook"><small>THE OPEN</small><p>{concept.hook}</p></div><div className="concept-detail concept-visual"><small>VISUAL WORLD</small><p>{concept.visualWorld}</p></div><details className="concept-more"><summary>Read the full treatment <span>+</span></summary><div><section><small>30-SECOND STORY</small><p>{concept.story}</p></section><section><small>PRODUCT&apos;S ROLE</small><p>{concept.productRole}</p></section><section><small>ENDING</small><p>{concept.ending}</p></section></div></details><button className="concept-select" type="button" aria-pressed={selected} disabled={storyboardLoading} onClick={() => generateStoryboard(concept)}>{buildingThis ? "Building storyboard…" : "Choose this direction"}<span>{buildingThis ? "•••" : "↗"}</span></button></article>; })}</div>
     {error ? <p className="error concepts-error" role="alert">{error}</p> : null}
-    <footer className="concept-actions"><button className="new-button" type="button" disabled={loading || storyboardLoading} onClick={regenerateConcepts}>{loading ? "Finding new directions…" : "Generate 3 new directions"}</button><small>{selectedConcept ? `Selected: ${selectedConcept.conceptName}` : "Choose a direction to generate its storyboard"}</small></footer>
+    <footer className="concept-actions"><button className="new-button" type="button" disabled={loading || storyboardLoading} onClick={regenerateConcepts}>{loading ? "Finding new directions…" : "Generate 3 new directions"}</button><small>{studioStatus || (selectedConcept ? `Selected: ${selectedConcept.conceptName}` : "Choose a direction to generate its storyboard")}</small></footer>
   </main>;
 
   return <main className="page landing-page">
@@ -175,13 +234,13 @@ export default function Home() {
       <div className="brief-intro"><p className="eyebrow">The brief</p><h2>Five answers.<br />One filmable idea.</h2><p>Focus the message, choose the screen, and set the visual character.</p></div>
       <form className="brief-card" onSubmit={generateConcepts}>
         <div className="section-label"><span>BR</span><h2>Creative brief</h2><em>5 decisions</em></div>
-        <section className="brief-step"><div className="step-heading"><b>01</b><div><small>Brand / Product</small><h3>What are we advertising?</h3></div></div><textarea required value={form.brandProduct} onChange={(event) => setForm({ ...form, brandProduct: event.target.value })} rows={2} aria-label="What are we advertising?" /></section>
-        <section className="brief-step"><div className="step-heading"><b>02</b><div><small>Audience</small><h3>Who specifically needs to care?</h3></div></div><input required maxLength={160} value={form.audience} onChange={(event) => setForm({ ...form, audience: event.target.value })} aria-label="Who specifically needs to care?" /></section>
-        <section className="brief-step"><div className="step-heading"><b>03</b><div><small>Single-minded proposition</small><h3>After watching this ad, what ONE thing should they remember?</h3></div></div><textarea required value={form.proposition} onChange={(event) => setForm({ ...form, proposition: event.target.value })} rows={2} aria-label="What one thing should they remember?" /></section>
+        <section className="brief-step"><div className="step-heading"><b>01</b><div><small>Brand / Product</small><h3>What are we advertising?</h3></div></div><textarea required value={form.brandProduct} onChange={(event) => setForm({ ...form, brandProduct: event.target.value })} rows={2} placeholder="e.g. Noor — one-of-one sterling silver jewellery" aria-label="What are we advertising?" /></section>
+        <section className="brief-step"><div className="step-heading"><b>02</b><div><small>Audience</small><h3>Who specifically needs to care?</h3></div></div><input required maxLength={160} value={form.audience} onChange={(event) => setForm({ ...form, audience: event.target.value })} placeholder="e.g. Design-conscious women who value original pieces" aria-label="Who specifically needs to care?" /></section>
+        <section className="brief-step"><div className="step-heading"><b>03</b><div><small>Single-minded proposition</small><h3>After watching this ad, what ONE thing should they remember?</h3></div></div><textarea required value={form.proposition} onChange={(event) => setForm({ ...form, proposition: event.target.value })} rows={2} placeholder="e.g. Every piece is made only once" aria-label="What one thing should they remember?" /></section>
         <section className="brief-step"><div className="step-heading"><b>04</b><div><small>Platform</small><h3>Where will this ad run?</h3></div></div><div className="choice-grid platform-choices" role="group" aria-label="Platform">{platforms.map((platform) => <button className="choice-chip" type="button" aria-pressed={form.platform === platform} key={platform} onClick={() => setForm({ ...form, platform })}>{platform}</button>)}</div></section>
         <section className="brief-step"><div className="step-heading"><b>05</b><div><small>Visual tone</small><h3>How should it feel?</h3></div><span className="selection-count" id="tone-limit">{form.visualTones.length} / 3</span></div><div className="choice-grid tone-choices" role="group" aria-label="Visual tone" aria-describedby="tone-limit">{visualToneOptions.map((tone) => { const selected = form.visualTones.includes(tone); const atLimit = form.visualTones.length === 3; return <button className="choice-chip" type="button" aria-pressed={selected} disabled={!selected && atLimit} key={tone} onClick={() => toggleVisualTone(tone)}>{tone}</button>; })}</div></section>
         {error ? <p className="error" role="alert">{error}</p> : null}
-        <div className="form-action"><button className="primary-button" disabled={loading}>{loading ? "Finding three ideas…" : <>Generate concepts <span>↗</span></>}</button><small>3 distinct creative directions</small></div>
+        <div className="form-action"><button className="primary-button" disabled={loading}>{loading ? "Finding three ideas…" : <>Develop concepts <span>↗</span></>}</button><small>3 distinct creative directions</small></div>
       </form>
     </section>
   </main>;

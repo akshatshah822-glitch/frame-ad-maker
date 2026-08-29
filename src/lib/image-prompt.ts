@@ -1,13 +1,4 @@
-export type VisualBible = {
-  subject: string;
-  product: string;
-  location: string;
-  colorPalette: string[];
-  lighting: string;
-  cinematography: string;
-  texture: string;
-  continuityLocks: string[];
-};
+import type { VisualBible } from "@/lib/types";
 
 export type ImagePromptInput = {
   storyContext: string;
@@ -24,12 +15,24 @@ export type ImagePromptInput = {
   visualBible: VisualBible;
 };
 
-const aspectRatios: Record<string, string> = {
-  "Instagram / Reels": "9:16 vertical",
-  "Meta Ads": "4:5 portrait",
-  YouTube: "16:9 landscape",
-  "TV / OTT": "16:9 landscape",
+const platformImages: Record<string, { promptRatio: string; apiSize: string }> = {
+  "Instagram / Reels": { promptRatio: "9:16 vertical", apiSize: "1024x1824" },
+  "Meta Ads": { promptRatio: "4:5 portrait", apiSize: "1024x1280" },
+  YouTube: { promptRatio: "16:9 landscape", apiSize: "1824x1024" },
+  "TV / OTT": { promptRatio: "16:9 landscape", apiSize: "1824x1024" },
 };
+
+export const supportedPlatforms = Object.keys(platformImages);
+
+export function getImageSize(platform: string) {
+  return platformImages[platform]?.apiSize ?? "1824x1024";
+}
+
+export function getPlatformFormat(platform: string) {
+  if (platform === "Instagram / Reels") return "vertical";
+  if (platform === "Meta Ads") return "portrait";
+  return "landscape";
+}
 
 export function buildImagePrompt({
   storyContext, purpose, subjectAction, cameraFraming, cameraAngle, lensSuggestion,
@@ -37,7 +40,7 @@ export function buildImagePrompt({
 }: ImagePromptInput): string {
   const palette = visualBible.colorPalette.join(", ");
   const continuityLocks = visualBible.continuityLocks.map((lock) => `- ${lock}`).join("\n");
-  const aspectRatio = aspectRatios[platform] ?? "16:9 landscape";
+  const aspectRatio = platformImages[platform]?.promptRatio ?? "16:9 landscape";
 
   return `Create a photorealistic cinematic advertising frame.
 

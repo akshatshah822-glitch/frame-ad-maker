@@ -2,19 +2,13 @@ import { NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
 import OpenAI from "openai";
-import { buildImagePrompt, type VisualBible } from "@/lib/image-prompt";
+import { buildImagePrompt } from "@/lib/image-prompt";
+import type { Concept, Generation, Shot, VisualBible } from "@/lib/types";
+import { classifyOpenAIError } from "@/lib/openai-error";
 
-type Concept = { conceptName: string; idea: string; hook: string; story: string; productRole: string; visualWorld: string; ending: string };
 type StoryboardBrief = { brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown };
-type Shot = {
-  shotNumber: number; startTime: number; endTime: number; purpose: string; visualDescription: string;
-  subjectAction: string; cameraFraming: string; cameraAngle: string; lensSuggestion: string;
-  cameraMovement: string; lighting: string; audio: string; voiceoverOrDialogue: string;
-  productPresence: string; locationAndProps: string; imagePrompt: string;
-};
-type ModelShot = Omit<Shot, "imagePrompt">;
+type ModelShot = Omit<Shot, "imagePrompt" | "imageStatus" | "imageUrl" | "imageStorageId" | "imageError">;
 type ModelGeneration = { title: string; duration: string; visualBible: VisualBible; shots: ModelShot[] };
-type Generation = { title: string; duration: string; visualBible: VisualBible; shots: Shot[] };
 
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"];
 const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"];
@@ -180,6 +174,7 @@ Return only the structured storyboard.`,
     shots: modelGeneration.shots.map((shot) => ({
       ...shot,
       imagePrompt: buildImagePrompt({ ...sharedPromptContext, ...shot }),
+      imageStatus: "pending" as const,
     })),
   };
 }
@@ -206,18 +201,24 @@ export async function POST(request: Request) {
   try { generation = await makeGeneration({ brandProduct, audience, proposition, platform, visualTones, selectedConcept }); }
   catch (error) {
     console.error("OpenAI storyboard generation failed", error);
-    if ((error as { status?: number }).status === 429) return NextResponse.json({ error: "OpenAI needs API credits before it can create storyboards. Add billing, then try again." }, { status: 402 });
-    return NextResponse.json({ error: "OpenAI could not generate the storyboard. Please try again." }, { status: 502 });
+    const kind = classifyOpenAIError(error);
+    if (kind === "rate_limit") return NextResponse.json({ error: "We're receiving too many generation requests. Try again shortly." }, { status: 429 });
+    if (kind === "quota" || kind === "configuration") return NextResponse.json({ error: "Storyboard generation is not available for this project right now." }, { status: 503 });
+    return NextResponse.json({ error: "We couldn't build the storyboard. Try again." }, { status: 502 });
   }
   if (!generation) return NextResponse.json({ error: "The storyboard came back incomplete. Please generate it again." }, { status: 502 });
 
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-  if (!convexUrl) return NextResponse.json({ error: "Your storyboard was created but Convex is not connected yet." }, { status: 503 });
+  if (!convexUrl) {
+    console.warn("Storyboard generated without persistence: NEXT_PUBLIC_CONVEX_URL is missing");
+    return NextResponse.json({ generation, saved: false });
+  }
   try {
     const client = new ConvexHttpClient(convexUrl);
-    await client.mutation(anyApi.generations.save, { brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) });
-  } catch {
-    return NextResponse.json({ error: "Your storyboard was created but could not be saved to Convex." }, { status: 503 });
+    const generationId = await client.mutation(anyApi.generations.save, { brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) });
+    return NextResponse.json({ generation, generationId, saved: true });
+  } catch (error) {
+    console.warn("Storyboard generated but Convex persistence failed", error);
+    return NextResponse.json({ generation, saved: false });
   }
-  return NextResponse.json({ generation, saved: true });
 }

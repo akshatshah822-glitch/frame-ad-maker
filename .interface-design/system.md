@@ -46,7 +46,7 @@ FRAME should feel like a focused creative director's workbench: editorial, preci
 - Each section contains one category label, one direct question, and one control group.
 - Section numbers are coral and use `01`, `02`, `03`, `04`, `05`.
 - Questions use the brand manager's language and avoid explanatory paragraphs.
-- The primary action follows all five sections and retains the label `Generate my ad`.
+- The primary action follows all five sections and uses the label `Develop concepts` so it accurately describes the next step.
 
 ## Choice chips
 
@@ -105,3 +105,6 @@ FRAME should feel like a focused creative director's workbench: editorial, preci
 - Keep purpose, angle/movement, lighting, production design, product continuity, and the raw image prompt inside the collapsed generation-details area.
 - Do not expose raw image-generation prompts by default.
 - Do not add shot-directing controls until that workflow is explicitly designed.
+- Image rendering states stay inside each frame: waiting, directing, completed image, or a local failure with an explicit `Retry frame` action.
+- During the six-frame render queue, use one compact studio-status strip with real stage copy. Never display invented percentages.
+- Match the visible frame shape to platform intent: `9:16` for Reels, `4:5` for Meta Ads, and `16:9` for YouTube and TV / OTT.
