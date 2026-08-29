@@ -14,8 +14,12 @@ export async function generateVoiceSegments(shots: Shot[], brief: Brief) {
   const segments: VoiceSegment[] = [];
   for (const shot of shots) {
     if (!hasDialogue(shot.voiceoverOrDialogue)) continue;
-    const speech = await client.audio.speech.create({ model: "tts-1-hd", voice, input: cleanDialogue(shot.voiceoverOrDialogue), response_format: "mp3", speed: 1 });
-    segments.push({ shotNumber: shot.shotNumber, startTime: shot.startTime, endTime: shot.endTime, bytes: new Uint8Array(await speech.arrayBuffer()) });
+    try {
+      const speech = await client.audio.speech.create({ model: "tts-1-hd", voice, input: cleanDialogue(shot.voiceoverOrDialogue), response_format: "mp3", speed: 1 });
+      segments.push({ shotNumber: shot.shotNumber, startTime: shot.startTime, endTime: shot.endTime, bytes: new Uint8Array(await speech.arrayBuffer()) });
+    } catch (error) {
+      console.warn(`Voice generation skipped for shot ${shot.shotNumber}`, error);
+    }
   }
   return segments;
 }

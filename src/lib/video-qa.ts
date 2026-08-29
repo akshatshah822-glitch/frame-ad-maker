@@ -1,13 +1,14 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import ffprobeStatic from "ffprobe-static";
+import { join } from "node:path";
 
 const exec = promisify(execFile);
 
 export type TechnicalQa = { duration: number; width: number; height: number; fps: number; videoCodec: string; pixelFormat: string; audioCodec: string; audioSampleRate: number; passed: boolean };
 
 export async function probeFinalVideo(path: string, expected: { width: number; height: number; duration: number }): Promise<TechnicalQa> {
-  const { stdout } = await exec(ffprobeStatic.path, ["-v", "error", "-show_streams", "-show_format", "-of", "json", path], { maxBuffer: 2_000_000 });
+  const executable = join(process.cwd(), "node_modules", "ffprobe-static", "bin", "linux", "x64", "ffprobe");
+  const { stdout } = await exec(executable, ["-v", "error", "-show_streams", "-show_format", "-of", "json", path], { maxBuffer: 2_000_000 });
   const result = JSON.parse(stdout) as { streams: Array<Record<string, string | number>>; format: Record<string, string> };
   const video = result.streams.find((stream) => stream.codec_type === "video") ?? {};
   const audio = result.streams.find((stream) => stream.codec_type === "audio") ?? {};
