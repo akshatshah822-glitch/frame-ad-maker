@@ -3,12 +3,12 @@ import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
 import OpenAI from "openai";
 import { buildImagePrompt } from "@/lib/image-prompt";
-import type { Concept, Generation, Shot, VisualBible } from "@/lib/types";
+import type { BrandBible, Concept, CreativeGrammar, Generation, Shot, VisualBible } from "@/lib/types";
 import { classifyOpenAIError } from "@/lib/openai-error";
 
 type StoryboardBrief = { brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown };
 type ModelShot = Omit<Shot, "imagePrompt" | "imageStatus" | "imageUrl" | "imageStorageId" | "imageError">;
-type ModelGeneration = { title: string; duration: string; visualBible: VisualBible; shots: ModelShot[] };
+type ModelGeneration = { title: string; duration: string; brandBible: BrandBible; creativeGrammar: CreativeGrammar; visualBible: VisualBible; shots: ModelShot[] };
 
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"];
 const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"];
@@ -16,6 +16,10 @@ const conceptFields = ["conceptName", "idea", "hook", "story", "productRole", "v
 const stringShotFields = ["purpose", "displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "voiceoverOrDialogue", "productPresence", "locationAndProps"] as const;
 const requiredShotContentFields = ["displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "productPresence", "locationAndProps"] as const;
 const visualBibleStringFields = ["subject", "product", "location", "lighting", "cinematography", "texture"] as const;
+const brandBibleStringFields = ["brandName", "category", "product", "audience", "singleMindedProposition", "reasonToBelieve", "toneOfVoice", "visualLanguage"] as const;
+const brandBibleArrayFields = ["brandPersonality", "brandColors", "productDesignLocks", "packagingLocks", "logoRules", "characterOrMascotRules", "thingsBrandWouldDo", "thingsBrandWouldNeverDo"] as const;
+const grammarFields = ["creativeArchetype", "emotionalArc", "hookMechanism", "productRevealStrategy", "performanceStyle", "editingRhythm", "cameraPhilosophy", "copyDensity", "humourLevel", "audioRole", "brandRevealStyle", "ctaBehaviour", "platformBehaviour"] as const;
+const motionFields = ["startState", "endState", "startPosition", "movementPath", "endPosition", "subjectMotion", "productMotion", "cameraMotion", "environmentMotion", "focusMotion", "performanceBeat", "gazeAndExpression", "transitionIntent"] as const;
 const shotStructure = [
   { shotNumber: 1, startTime: 0, endTime: 3, purpose: "HOOK" },
   { shotNumber: 2, startTime: 3, endTime: 7, purpose: "TENSION" },
@@ -34,10 +38,21 @@ function isConcept(value: unknown): value is Concept {
 const outputSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["title", "duration", "visualBible", "shots"],
-  properties: {
-    title: { type: "string" },
-    duration: { type: "string" },
+    required: ["title", "duration", "brandBible", "creativeGrammar", "visualBible", "shots"],
+    properties: {
+      title: { type: "string" },
+      duration: { type: "string" },
+      brandBible: {
+        type: "object", additionalProperties: false, required: [...brandBibleStringFields, ...brandBibleArrayFields],
+        properties: {
+          brandName: { type: "string" }, category: { type: "string" }, product: { type: "string" }, audience: { type: "string" }, singleMindedProposition: { type: "string" }, reasonToBelieve: { type: "string" }, toneOfVoice: { type: "string" }, visualLanguage: { type: "string" },
+          brandPersonality: { type: "array", items: { type: "string" } }, brandColors: { type: "array", items: { type: "string" } }, productDesignLocks: { type: "array", items: { type: "string" } }, packagingLocks: { type: "array", items: { type: "string" } }, logoRules: { type: "array", items: { type: "string" } }, characterOrMascotRules: { type: "array", items: { type: "string" } }, thingsBrandWouldDo: { type: "array", items: { type: "string" } }, thingsBrandWouldNeverDo: { type: "array", items: { type: "string" } },
+        },
+      },
+      creativeGrammar: {
+        type: "object", additionalProperties: false, required: [...grammarFields],
+        properties: Object.fromEntries(grammarFields.map((field) => [field, { type: "string" }])),
+      },
     visualBible: {
       type: "object",
       additionalProperties: false,
@@ -56,7 +71,7 @@ const outputSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["shotNumber", "startTime", "endTime", ...stringShotFields],
+        required: ["shotNumber", "startTime", "endTime", ...stringShotFields, "motionDirection"],
         properties: {
           shotNumber: { type: "integer" }, startTime: { type: "integer" }, endTime: { type: "integer" },
           purpose: { type: "string", enum: shotStructure.map((shot) => shot.purpose) },
@@ -65,6 +80,10 @@ const outputSchema = {
           cameraAngle: { type: "string" }, lensSuggestion: { type: "string" }, cameraMovement: { type: "string" },
           lighting: { type: "string" }, audio: { type: "string" }, voiceoverOrDialogue: { type: "string" },
           productPresence: { type: "string" }, locationAndProps: { type: "string" },
+          motionDirection: {
+            type: "object", additionalProperties: false, required: [...motionFields, "motionIntensity"],
+            properties: { ...Object.fromEntries(motionFields.map((field) => [field, { type: "string" }])), motionIntensity: { type: "string", enum: ["restrained", "moderate", "energetic"] } },
+          },
         },
       },
     },
@@ -79,14 +98,20 @@ function parseGeneration(outputText: string): ModelGeneration | null {
   try {
     const parsed = JSON.parse(outputText) as Partial<ModelGeneration>;
     const bible = parsed.visualBible as Record<string, unknown> | undefined;
+    const brand = parsed.brandBible as unknown as Record<string, unknown> | undefined;
+    const grammar = parsed.creativeGrammar as unknown as Record<string, unknown> | undefined;
     const bibleValid = bible && visualBibleStringFields.every((field) => typeof bible[field] === "string" && (bible[field] as string).trim().length > 0)
       && isNonEmptyStringArray(bible.colorPalette, 4) && isNonEmptyStringArray(bible.continuityLocks);
-    if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length !== 6) return null;
+    const brandValid = brand && brandBibleStringFields.every((field) => typeof brand[field] === "string") && brandBibleArrayFields.every((field) => Array.isArray(brand[field]));
+    const grammarValid = grammar && grammarFields.every((field) => typeof grammar[field] === "string" && Boolean((grammar[field] as string).trim()));
+    if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !brandValid || !grammarValid || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length !== 6) return null;
     const valid = parsed.shots.every((shot) => {
       if (!shot || typeof shot !== "object") return false;
       const stringsComplete = requiredShotContentFields.every((field) => typeof shot[field] === "string" && shot[field].trim().length > 0)
         && typeof shot.voiceoverOrDialogue === "string";
-      return stringsComplete;
+      const motion = shot.motionDirection as unknown as Record<string, unknown> | undefined;
+      const motionValid = motion && motionFields.every((field) => typeof motion[field] === "string" && Boolean((motion[field] as string).trim())) && ["restrained", "moderate", "energetic"].includes(String(motion.motionIntensity));
+      return stringsComplete && motionValid;
     });
     if (!valid) return null;
     return {
@@ -161,11 +186,20 @@ VISUAL BIBLE
 - Continuity locks must explicitly list everything that cannot change across the six shots.
 - Avoid plastic skin, inconsistent faces, random background objects, unnecessary neon, excessive bokeh, inconsistent wardrobe, inconsistent product shape, warped jewellery or products, and text inside images.
 
+BRAND BIBLE AND CREATIVE GRAMMAR
+- Derive a compact Brand Bible only from this brief and approved concept. Never invent official colours, logos, packaging, mascots, claims, legal rules, or established brand behaviour; use empty arrays when unavailable.
+- Identify the audience desire, category tension, human truth, product truth, reason to believe, single-minded message and creative opportunity internally.
+- Select the most fitting creative archetype. Do not default to premium slow motion.
+- Creative Grammar must define how this specific ad communicates: arc, hook, reveal, performance, edit rhythm, camera, copy, humour, audio, brand reveal, CTA and platform behaviour.
+
 SHOT DIRECTION
 - displayVisual must be one plain, filmable sentence of roughly 8–20 words.
 - displayCamera must be one concise instruction combining framing, lens, and movement, such as "85mm close-up · slow push-in".
 - displayAction must be one concise, physical action sentence.
 - Keep the detailed production fields complete. The display fields are summaries for a producer, not replacements.
+- motionDirection must lock start/end states, blocking positions, movement path, subject/product/camera/environment/focus motion, intensity, performance, gaze and the editable transition beat.
+- Camera movement must serve story, emotion, product or reveal. Locked-off is valid. Choose lens character from scene geometry rather than random numbers.
+- Direct micro-expression, gaze, gesture, body language and product interaction. Never default to smiling at camera.
 - For every shot, locationAndProps must specify only the set dressing and props visible in that frame while staying inside the shared location logic.
 - Vary action, framing, angle, lens, and movement so the sequence progresses visually.
 - Do not write final image prompts. The application constructs them from the shared Visual Bible and shot direction.
@@ -227,7 +261,7 @@ export async function POST(request: Request) {
   }
   try {
     const client = new ConvexHttpClient(convexUrl);
-    const generationId = await client.mutation(anyApi.generations.save, { brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) });
+    const generationId = await client.mutation(anyApi.generations.save, { brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) });
     return NextResponse.json({ generation, generationId, saved: true });
   } catch (error) {
     console.warn("Storyboard generated but Convex persistence failed", error);

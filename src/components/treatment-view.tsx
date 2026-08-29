@@ -6,6 +6,7 @@ import { getPlatformFormat } from "@/lib/image-prompt";
 import { getShotDisplay, hasDialogue } from "@/lib/treatment";
 import type { AppPhase, Shot, TreatmentData } from "@/lib/types";
 import { CompletionActions } from "@/components/completion-actions";
+import { VideoProduction } from "@/components/video-production";
 
 const shotLabels = ["Hook", "Tension", "Product", "Proof", "Payoff", "Brand"] as const;
 
@@ -57,6 +58,7 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
         </div></details>
       </article>;
     })}</section>
+    {ready && completeCount === 6 ? <VideoProduction generationId={treatment.id} /> : null}
     {ready ? <footer className="result-footer"><p>{saved ? "Treatment and frames saved." : "Treatment created. Saving was unavailable for this run."}</p></footer> : null}
   </main>;
 }

@@ -9,6 +9,7 @@
  */
 
 import type * as generations from "../generations.js";
+import type * as videoProductions from "../videoProductions.js";
 
 import type {
   ApiFromModules,
@@ -18,6 +19,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   generations: typeof generations;
+  videoProductions: typeof videoProductions;
 }>;
 
 /**

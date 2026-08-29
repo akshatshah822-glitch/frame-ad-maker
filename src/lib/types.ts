@@ -27,6 +27,58 @@ export type VisualBible = {
   continuityLocks: string[];
 };
 
+export type BrandBible = {
+  brandName: string;
+  category: string;
+  product: string;
+  audience: string;
+  singleMindedProposition: string;
+  reasonToBelieve: string;
+  brandPersonality: string[];
+  toneOfVoice: string;
+  visualLanguage: string;
+  brandColors: string[];
+  productDesignLocks: string[];
+  packagingLocks: string[];
+  logoRules: string[];
+  characterOrMascotRules: string[];
+  thingsBrandWouldDo: string[];
+  thingsBrandWouldNeverDo: string[];
+};
+
+export type CreativeGrammar = {
+  creativeArchetype: string;
+  emotionalArc: string;
+  hookMechanism: string;
+  productRevealStrategy: string;
+  performanceStyle: string;
+  editingRhythm: string;
+  cameraPhilosophy: string;
+  copyDensity: string;
+  humourLevel: string;
+  audioRole: string;
+  brandRevealStyle: string;
+  ctaBehaviour: string;
+  platformBehaviour: string;
+};
+
+export type MotionDirection = {
+  startState: string;
+  endState: string;
+  startPosition: string;
+  movementPath: string;
+  endPosition: string;
+  subjectMotion: string;
+  productMotion: string;
+  cameraMotion: string;
+  environmentMotion: string;
+  focusMotion: string;
+  motionIntensity: "restrained" | "moderate" | "energetic";
+  performanceBeat: string;
+  gazeAndExpression: string;
+  transitionIntent: string;
+};
+
 export type ImageStatus = "pending" | "generating" | "complete" | "failed";
 
 export type AppPhase =
@@ -62,13 +114,58 @@ export type Shot = {
   imageUrl?: string;
   imageStorageId?: string;
   imageError?: string;
+  motionDirection?: MotionDirection;
 };
 
 export type Generation = {
   title: string;
   duration: string;
   visualBible: VisualBible;
+  brandBible?: BrandBible;
+  creativeGrammar?: CreativeGrammar;
   shots: Shot[];
+};
+
+export type VideoClipStatus = "waiting" | "submitted" | "running" | "complete" | "failed" | "cancelled";
+
+export type VideoClip = {
+  shotNumber: number;
+  jobKey: string;
+  status: VideoClipStatus;
+  providerTaskId?: string;
+  progress?: number;
+  motionPrompt: string;
+  duration: number;
+  videoUrl?: string;
+  videoStorageId?: string;
+  error?: string;
+  failureCode?: string;
+  retries: number;
+  estimatedCredits?: number;
+  finalCredits?: number;
+  submittedAt?: number;
+  completedAt?: number;
+};
+
+export type VideoProductionStatus = "creating" | "generating" | "clips_ready" | "assembling" | "ready" | "partial_failure" | "cancelled" | "failed";
+
+export type VideoProduction = {
+  id: string;
+  generationId: string;
+  status: VideoProductionStatus;
+  provider: "runway";
+  model: "gen4.5";
+  clips: VideoClip[];
+  finalVideoUrl?: string;
+  finalVideoStorageId?: string;
+  technicalQa?: string;
+  error?: string;
+  startedAt: number;
+  updatedAt: number;
+  clipsReadyAt?: number;
+  assemblyStartedAt?: number;
+  finalReadyAt?: number;
+  totalFinalCredits?: number;
 };
 
 export type TreatmentData = {

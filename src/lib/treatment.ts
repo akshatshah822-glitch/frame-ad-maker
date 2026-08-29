@@ -46,6 +46,8 @@ export function parseStoredTreatment(record: Record<string, unknown>): Treatment
   try {
     const concept = JSON.parse(String(record.selectedConcept ?? "")) as Concept;
     const visualBible = JSON.parse(String(record.visualBible ?? "")) as VisualBible;
+    const brandBible = record.brandBible ? JSON.parse(String(record.brandBible)) : undefined;
+    const creativeGrammar = record.creativeGrammar ? JSON.parse(String(record.creativeGrammar)) : undefined;
     const shots = JSON.parse(String(record.shotList ?? "")) as Shot[];
     if (!concept?.conceptName || !visualBible?.subject || !Array.isArray(shots) || shots.length !== 6) return null;
     return {
@@ -58,7 +60,7 @@ export function parseStoredTreatment(record: Record<string, unknown>): Treatment
         visualTones: Array.isArray(record.visualTones) ? record.visualTones.map(String) : [],
       },
       concept,
-      generation: { title: String(record.title ?? concept.conceptName), duration: "30 seconds", visualBible, shots },
+      generation: { title: String(record.title ?? concept.conceptName), duration: "30 seconds", brandBible, creativeGrammar, visualBible, shots },
     };
   } catch {
     return null;
