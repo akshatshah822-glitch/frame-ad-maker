@@ -14,43 +14,20 @@ export function buildMotionPrompt({ brandBible, creativeGrammar, visualBible, sh
     cameraMotion: shot.cameraMovement, environmentMotion: "Only physically motivated ambient movement", focusMotion: "Preserve intentional optical focus",
     motionIntensity: "restrained", performanceBeat: shot.subjectAction, gazeAndExpression: "Natural to the story beat", transitionIntent: "End on a clean cut point",
   };
-  return `Animate this approved advertising keyframe as one shot from the same commercial.
+  const compact = (value: string, limit: number) => value.replace(/\s+/g, " ").trim().slice(0, limit);
+  return `REFERENCE FRAME IS AUTHORITATIVE. Frame zero must match it exactly: same composition, crop, subject, product, face, hands, wardrobe, set, props, lighting, palette and focus. Do not redesign or reinterpret anything.
 
-PRESERVE
-- Exact subject identity: ${visualBible.subject}
-- Exact product design: ${visualBible.product}
-- Wardrobe, accessories, environment, lighting, colour palette and production design from the reference image.
-- Brand product locks: ${brandBible.productDesignLocks.join("; ") || "preserve every visible product detail"}
-- Continuity locks: ${visualBible.continuityLocks.join("; ")}
+LOCK SUBJECT: ${compact(visualBible.subject, 150)}
+LOCK PRODUCT: ${compact(brandBible.productDesignLocks.join("; ") || visualBible.product, 170)}
+LOCK CONTINUITY: ${compact(visualBible.continuityLocks.join("; "), 150)}
+STYLE: ${compact(creativeGrammar.cameraPhilosophy, 80)}
 
-CREATIVE GRAMMAR
-${creativeGrammar.creativeArchetype}. ${creativeGrammar.performanceStyle}. ${creativeGrammar.cameraPhilosophy}. Edit rhythm: ${creativeGrammar.editingRhythm}.
+ANIMATE ONLY
+Subject: ${compact(motion.subjectMotion, 120)}
+Product: ${compact(motion.productMotion, 90)}
+Camera: ${compact(motion.cameraMotion, 80)}
+Focus/environment: ${compact(`${motion.focusMotion}; ${motion.environmentMotion}`, 100)}
+Intensity: ${compact(motion.motionIntensity, 40)}
 
-START
-${motion.startState}
-Blocking: ${motion.startPosition}
-
-ANIMATE
-Subject: ${motion.subjectMotion}
-Performance: ${motion.performanceBeat}; ${motion.gazeAndExpression}
-Movement path: ${motion.movementPath}
-Product: ${motion.productMotion}
-Camera: ${motion.cameraMotion}
-Focus: ${motion.focusMotion}
-Environment: ${motion.environmentMotion}
-Motion intensity: ${motion.motionIntensity}
-
-END
-${motion.endState}
-End position: ${motion.endPosition}
-Edit intent: ${motion.transitionIntent}
-
-DO NOT
-- change the face, age, hair, wardrobe, hands, product, packaging, labels, set, lighting or palette
-- morph, bend, duplicate, resize or redesign the product
-- add people, limbs, fingers, props, text, captions, logos or floating objects
-- create impossible physics, random gestures, camera drift, excessive bokeh or arbitrary slow motion
-- cut to a new scene or reinterpret the art direction
-
-Believable controlled commercial motion. Preserve the approved first frame exactly at the start.`.slice(0, 1000);
+Keep motion restrained and physically believable. One continuous shot. No cuts, new scene, extra people or objects, identity change, product morphing, text, logos, random gestures, camera drift or impossible physics. End: ${compact(motion.endState, 100)}`.slice(0, 1000);
 }

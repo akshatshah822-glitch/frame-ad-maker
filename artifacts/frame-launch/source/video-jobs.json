@@ -1,0 +1,20 @@
+{
+  "beauty": {
+    "taskId": "3475b87e-e5b5-4947-8749-2726f7590df1",
+    "estimatedCredits": 60,
+    "finalCredits": 60,
+    "outputPath": "public/launch-assets/beauty-clip.mp4"
+  },
+  "mobility": {
+    "taskId": "5a22928d-6248-4ba4-9e9b-a7fa3faa6b27",
+    "estimatedCredits": 60,
+    "finalCredits": 60,
+    "outputPath": "public/launch-assets/mobility-clip.mp4"
+  },
+  "beverage": {
+    "taskId": "3c4f573f-4ca6-4ce3-8bcc-bf4f9879d3f3",
+    "estimatedCredits": 60,
+    "finalCredits": 60,
+    "outputPath": "public/launch-assets/beverage-clip.mp4"
+  }
+}

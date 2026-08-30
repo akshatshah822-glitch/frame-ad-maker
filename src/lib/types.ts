@@ -1,9 +1,15 @@
+export type CreativeIntent = "performance" | "cinematic";
+
 export type Brief = {
+  intent: CreativeIntent;
   brandProduct: string;
   audience: string;
   proposition: string;
   platform: string;
   visualTones: string[];
+  testObjective?: string;
+  testObjectiveOther?: string;
+  preserveDetails?: string;
 };
 
 export type Concept = {
@@ -14,6 +20,15 @@ export type Concept = {
   productRole: string;
   visualWorld: string;
   ending: string;
+  creativeMechanism?: string;
+  proofMechanism?: string;
+  whatThisTests?: string;
+  logline?: string;
+  humanTruth?: string;
+  mainCharacter?: string;
+  centralConflict?: string;
+  emotionalArc?: string;
+  coreMessage?: string;
 };
 
 export type VisualBible = {
@@ -92,6 +107,8 @@ export type AppPhase =
 
 export type Shot = {
   shotNumber: number;
+  sceneNumber?: number;
+  narrativeBeat?: string;
   startTime: number;
   endTime: number;
   purpose: string;
@@ -109,6 +126,12 @@ export type Shot = {
   voiceoverOrDialogue: string;
   productPresence: string;
   locationAndProps: string;
+  productAction?: string;
+  performanceDirection?: string;
+  focusBehaviour?: string;
+  copyOrDialogue?: string;
+  audioIntent?: string;
+  transitionIntent?: string;
   imagePrompt: string;
   imageStatus: ImageStatus;
   imageUrl?: string;

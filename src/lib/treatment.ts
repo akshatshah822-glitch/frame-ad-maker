@@ -36,10 +36,13 @@ export function formatTreatmentText({ brief, concept, generation }: TreatmentDat
   const shots = generation.shots.map((shot) => {
     const display = getShotDisplay(shot);
     const audio = [hasDialogue(shot.voiceoverOrDialogue) ? `VO / Dialogue: ${shot.voiceoverOrDialogue}` : "", `Audio: ${shot.audio}`].filter(Boolean).join("\n");
-    return `SHOT ${String(shot.shotNumber).padStart(2, "0")} — ${shot.purpose} — ${shot.startTime}–${shot.endTime} sec\nVisual: ${display.visual}\nCamera: ${display.camera}\nAction: ${display.action}\n${audio}`;
+    return `SHOT ${String(shot.shotNumber).padStart(2, "0")} — ${shot.narrativeBeat || shot.purpose} — ${shot.startTime}–${shot.endTime} sec\nVisual: ${display.visual}\nCamera: ${display.camera}\nAction: ${display.action}\n${audio}`;
   }).join("\n\n");
 
-  return `FRAME\n\nBrand / Product: ${brief.brandProduct}\nPlatform: ${brief.platform}\nSelected Concept: ${concept.conceptName}\n\nCONCEPT\n${concept.conceptName}\n${concept.idea}\n\nVISUAL DIRECTION\n${summarizeVisualBible(generation.visualBible)}\n\n${shots}`;
+  const strategy = brief.intent === "cinematic"
+    ? `LOGLINE\n${concept.logline || concept.idea}\n\nHUMAN TRUTH\n${concept.humanTruth || ""}\n\nEMOTIONAL ARC\n${concept.emotionalArc || ""}`
+    : `WHAT THIS TESTS\n${concept.whatThisTests || brief.testObjective || ""}`;
+  return `FRAME\n\n${brief.intent === "cinematic" ? "Story / Subject" : "Brand / Product"}: ${brief.brandProduct}\nPlatform: ${brief.platform}\nSelected Concept: ${concept.conceptName}\n\nCONCEPT\n${concept.conceptName}\n${concept.idea}\n\n${strategy}\n\nSTORY\n${concept.story}\n\nVISUAL DIRECTION\n${summarizeVisualBible(generation.visualBible)}\n\n${shots}`;
 }
 
 export function parseStoredTreatment(record: Record<string, unknown>): TreatmentData | null {
@@ -49,15 +52,19 @@ export function parseStoredTreatment(record: Record<string, unknown>): Treatment
     const brandBible = record.brandBible ? JSON.parse(String(record.brandBible)) : undefined;
     const creativeGrammar = record.creativeGrammar ? JSON.parse(String(record.creativeGrammar)) : undefined;
     const shots = JSON.parse(String(record.shotList ?? "")) as Shot[];
-    if (!concept?.conceptName || !visualBible?.subject || !Array.isArray(shots) || shots.length !== 6) return null;
+    if (!concept?.conceptName || !visualBible?.subject || !Array.isArray(shots) || shots.length < 4 || shots.length > 10) return null;
     return {
       id: String(record._id ?? ""),
       brief: {
+        intent: record.intent === "cinematic" ? "cinematic" : "performance",
         brandProduct: String(record.brandProduct ?? ""),
         audience: String(record.audience ?? ""),
         proposition: String(record.proposition ?? ""),
         platform: String(record.platform ?? ""),
         visualTones: Array.isArray(record.visualTones) ? record.visualTones.map(String) : [],
+        testObjective: record.testObjective ? String(record.testObjective) : undefined,
+        testObjectiveOther: record.testObjectiveOther ? String(record.testObjectiveOther) : undefined,
+        preserveDetails: record.preserveDetails ? String(record.preserveDetails) : undefined,
       },
       concept,
       generation: { title: String(record.title ?? concept.conceptName), duration: "30 seconds", brandBible, creativeGrammar, visualBible, shots },
@@ -78,5 +85,5 @@ export function isConcept(value: unknown): value is Concept {
 export function isGeneration(value: unknown): value is Generation {
   if (!value || typeof value !== "object") return false;
   const generation = value as Partial<Generation>;
-  return Boolean(generation.visualBible?.subject && Array.isArray(generation.shots) && generation.shots.length === 6);
+  return Boolean(generation.visualBible?.subject && Array.isArray(generation.shots) && generation.shots.length >= 4 && generation.shots.length <= 10);
 }

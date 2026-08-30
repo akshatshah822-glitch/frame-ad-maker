@@ -1,6 +1,9 @@
 import type { VisualBible } from "@/lib/types";
 
 export type ImagePromptInput = {
+  intent: "performance" | "cinematic";
+  selectedConcept: string;
+  narrativeStructure: string;
   storyContext: string;
   purpose: string;
   subjectAction: string;
@@ -35,7 +38,7 @@ export function getPlatformFormat(platform: string) {
 }
 
 export function buildImagePrompt({
-  storyContext, purpose, subjectAction, cameraFraming, cameraAngle, lensSuggestion,
+  intent, selectedConcept, narrativeStructure, storyContext, purpose, subjectAction, cameraFraming, cameraAngle, lensSuggestion,
   cameraMovement, lighting, locationAndProps, selectedTone, platform, visualBible,
 }: ImagePromptInput): string {
   const palette = visualBible.colorPalette.join(", ");
@@ -43,6 +46,17 @@ export function buildImagePrompt({
   const aspectRatio = platformImages[platform]?.promptRatio ?? "16:9 landscape";
 
   return `Create a photorealistic cinematic advertising frame.
+
+Generate exactly one cinematic production frame. No collage, no montage grid, no contact sheet, no split screen, no multi-panel layout, no storyboard sheet.
+
+CREATIVE INTENT
+${intent === "performance" ? "Performance advertisement" : "Cinematic story"}
+
+SELECTED CONCEPT
+${selectedConcept}
+
+NARRATIVE STRUCTURE
+${narrativeStructure}
 
 STORY CONTEXT
 ${storyContext}
@@ -110,6 +124,12 @@ text
 captions
 watermarks
 unprovided logos
+collage
+montage grid
+contact sheet
+split screen
+multi-panel layout
+storyboard sheet
 distorted hands
 extra fingers
 plastic skin

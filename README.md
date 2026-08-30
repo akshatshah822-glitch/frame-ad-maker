@@ -1,6 +1,6 @@
 # FRAME
 
-FRAME turns a simple brand brief into three creative directions, one selected 30-second storyboard, a shared Visual Bible, and six generated commercial frames.
+FRAME turns a simple brief into three creative directions, one selected 30-second treatment, a shared Visual Bible, and 4–8 generated frames chosen for the idea.
 
 ## Product flow
 
@@ -8,9 +8,9 @@ FRAME turns a simple brand brief into three creative directions, one selected 30
 Brief
 → 3 creative directions
 → Select one
-→ Visual Bible + 6-shot storyboard
-→ 6 image prompts
-→ 6 generated frames
+→ Visual Bible + narrative architecture
+→ 4–8 image prompts
+→ 4–8 generated frames
 → Final treatment
 → Copy, PDF, or unlisted share link
 ```

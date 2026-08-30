@@ -8,14 +8,17 @@ function cleanDialogue(value: string) {
   return value.replace(/^(VO|VOICEOVER|DIALOGUE)(\s*\([^)]*\))?\s*:\s*/i, "").replace(/^['“]|['”]$/g, "").trim();
 }
 
-export async function generateVoiceSegments(shots: Shot[], brief: Brief) {
+export async function generateVoiceSegments(shots: Shot[], brief: Brief, narration?: string[]) {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const voice = brief.visualTones.some((tone) => /playful|emotional/i.test(tone)) ? "nova" : "onyx";
+  // One voice for the whole film prevents the speed and character changing between shots.
+  const voice = "nova";
   const segments: VoiceSegment[] = [];
   for (const shot of shots) {
-    if (!hasDialogue(shot.voiceoverOrDialogue)) continue;
+    const suppliedNarration = narration?.[shot.shotNumber - 1]?.trim();
+    const dialogue = suppliedNarration || (hasDialogue(shot.voiceoverOrDialogue) ? cleanDialogue(shot.voiceoverOrDialogue) : "");
+    if (!dialogue) continue;
     try {
-      const speech = await client.audio.speech.create({ model: "tts-1-hd", voice, input: cleanDialogue(shot.voiceoverOrDialogue), response_format: "mp3", speed: 1 });
+      const speech = await client.audio.speech.create({ model: "tts-1-hd", voice, input: dialogue, response_format: "mp3", speed: 1 });
       segments.push({ shotNumber: shot.shotNumber, startTime: shot.startTime, endTime: shot.endTime, bytes: new Uint8Array(await speech.arrayBuffer()) });
     } catch (error) {
       console.warn(`Voice generation skipped for shot ${shot.shotNumber}`, error);

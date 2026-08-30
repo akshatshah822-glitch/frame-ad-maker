@@ -15,7 +15,9 @@ export async function POST(request: Request) {
   if (!generationId) return NextResponse.json({ error: "A saved treatment is required." }, { status: 400 });
   if (!process.env.RUNWAYML_API_SECRET) return NextResponse.json({ error: "Video generation is not configured." }, { status: 503 });
   const treatment = await getTreatmentById(generationId);
-  if (!treatment || treatment.generation.shots.some((shot) => !shot.imageUrl || shot.imageStatus !== "complete")) return NextResponse.json({ error: "All six storyboard frames must be ready first." }, { status: 409 });
+  if (!treatment) return NextResponse.json({ error: "Treatment not found." }, { status: 404 });
+  if (treatment.generation.shots.length !== 6) return NextResponse.json({ error: "Video production is currently available only for six-frame treatments." }, { status: 409 });
+  if (treatment.generation.shots.some((shot) => !shot.imageUrl || shot.imageStatus !== "complete")) return NextResponse.json({ error: "All six storyboard frames must be ready first." }, { status: 409 });
   const context = resolveProductionContext({ ...treatment.brief, conceptName: treatment.concept.conceptName, conceptIdea: treatment.concept.idea, visualBible: treatment.generation.visualBible, brandBible: treatment.generation.brandBible, creativeGrammar: treatment.generation.creativeGrammar });
   const clips: VideoClip[] = treatment.generation.shots.map((shot) => ({ shotNumber: shot.shotNumber, jobKey: `${generationId}:shot:${shot.shotNumber}:v1`, status: "waiting", motionPrompt: buildMotionPrompt({ ...context, visualBible: treatment.generation.visualBible, shot }), duration: shot.endTime - shot.startTime, retries: 0 }));
   const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);

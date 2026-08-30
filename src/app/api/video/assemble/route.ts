@@ -8,16 +8,24 @@ import { getVideoProduction, uploadMedia } from "@/lib/video-production";
 export const maxDuration = 300;
 export const runtime = "nodejs";
 
+export async function GET() {
+  return NextResponse.json({
+    error: "Use POST to assemble a film.",
+    acceptedMethod: "POST",
+    requiredField: "generationId",
+  }, { status: 405, headers: { Allow: "POST" } });
+}
+
 export async function POST(request: Request) {
-  const { generationId } = await request.json().catch(() => ({})) as { generationId?: string };
+  const { generationId, force, narration } = await request.json().catch(() => ({})) as { generationId?: string; force?: boolean; narration?: string[] };
   if (!generationId) return NextResponse.json({ error: "A production ID is required." }, { status: 400 });
   const [production, treatment] = await Promise.all([getVideoProduction(generationId), getTreatmentById(generationId)]);
   if (!production || !treatment) return NextResponse.json({ error: "This production is unavailable." }, { status: 404 });
-  if (production.status === "ready") return NextResponse.json({ production });
+  if (production.status === "ready" && !force) return NextResponse.json({ production });
   const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-  if (!await convex.mutation(anyApi.videoProductions.beginAssembly, { id: production.id })) return NextResponse.json({ error: "The clips are not ready for assembly." }, { status: 409 });
+  if (!await convex.mutation(anyApi.videoProductions.beginAssembly, { id: production.id, force })) return NextResponse.json({ error: "The clips are not ready for assembly." }, { status: 409 });
   try {
-    const result = await assembleVideo(treatment, production);
+    const result = await assembleVideo(treatment, production, narration);
     const asset = await uploadMedia(result.bytes, "video/mp4");
     await convex.mutation(anyApi.videoProductions.finish, { id: production.id, finalVideoStorageId: asset.storageId, finalVideoUrl: asset.mediaUrl, technicalQa: JSON.stringify(result.qa) });
     return NextResponse.json({ production: await getVideoProduction(generationId) });

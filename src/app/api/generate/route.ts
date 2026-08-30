@@ -5,29 +5,22 @@ import OpenAI from "openai";
 import { buildImagePrompt } from "@/lib/image-prompt";
 import type { BrandBible, Concept, CreativeGrammar, Generation, Shot, VisualBible } from "@/lib/types";
 import { classifyOpenAIError } from "@/lib/openai-error";
+import { findUnsupportedProof, proofSafetyInstruction } from "@/lib/proof-safety";
 
-type StoryboardBrief = { brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown };
+type StoryboardBrief = { intent?: string; testObjective?: string; testObjectiveOther?: string; preserveDetails?: string; brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown; qaTargetShotCount?: number; runId?: string };
 type ModelShot = Omit<Shot, "imagePrompt" | "imageStatus" | "imageUrl" | "imageStorageId" | "imageError">;
 type ModelGeneration = { title: string; duration: string; brandBible: BrandBible; creativeGrammar: CreativeGrammar; visualBible: VisualBible; shots: ModelShot[] };
 
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"];
 const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"];
 const conceptFields = ["conceptName", "idea", "hook", "story", "productRole", "visualWorld", "ending"] as const;
-const stringShotFields = ["purpose", "displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "voiceoverOrDialogue", "productPresence", "locationAndProps"] as const;
+const stringShotFields = ["narrativeBeat", "purpose", "displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "productAction", "performanceDirection", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "focusBehaviour", "lighting", "audio", "audioIntent", "voiceoverOrDialogue", "copyOrDialogue", "productPresence", "locationAndProps", "transitionIntent"] as const;
 const requiredShotContentFields = ["displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "productPresence", "locationAndProps"] as const;
 const visualBibleStringFields = ["subject", "product", "location", "lighting", "cinematography", "texture"] as const;
 const brandBibleStringFields = ["brandName", "category", "product", "audience", "singleMindedProposition", "reasonToBelieve", "toneOfVoice", "visualLanguage"] as const;
 const brandBibleArrayFields = ["brandPersonality", "brandColors", "productDesignLocks", "packagingLocks", "logoRules", "characterOrMascotRules", "thingsBrandWouldDo", "thingsBrandWouldNeverDo"] as const;
 const grammarFields = ["creativeArchetype", "emotionalArc", "hookMechanism", "productRevealStrategy", "performanceStyle", "editingRhythm", "cameraPhilosophy", "copyDensity", "humourLevel", "audioRole", "brandRevealStyle", "ctaBehaviour", "platformBehaviour"] as const;
 const motionFields = ["startState", "endState", "startPosition", "movementPath", "endPosition", "subjectMotion", "productMotion", "cameraMotion", "environmentMotion", "focusMotion", "performanceBeat", "gazeAndExpression", "transitionIntent"] as const;
-const shotStructure = [
-  { shotNumber: 1, startTime: 0, endTime: 3, purpose: "HOOK" },
-  { shotNumber: 2, startTime: 3, endTime: 7, purpose: "TENSION" },
-  { shotNumber: 3, startTime: 7, endTime: 12, purpose: "PRODUCT" },
-  { shotNumber: 4, startTime: 12, endTime: 18, purpose: "PROOF / ESCALATION" },
-  { shotNumber: 5, startTime: 18, endTime: 25, purpose: "PAYOFF" },
-  { shotNumber: 6, startTime: 25, endTime: 30, purpose: "BRAND ENDING" },
-] as const;
 
 function isConcept(value: unknown): value is Concept {
   if (!value || typeof value !== "object") return false;
@@ -66,20 +59,20 @@ const outputSchema = {
     },
     shots: {
       type: "array",
-      minItems: 6,
-      maxItems: 6,
+      minItems: 4,
+      maxItems: 8,
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["shotNumber", "startTime", "endTime", ...stringShotFields, "motionDirection"],
+        required: ["shotNumber", "sceneNumber", "startTime", "endTime", ...stringShotFields, "motionDirection"],
         properties: {
-          shotNumber: { type: "integer" }, startTime: { type: "integer" }, endTime: { type: "integer" },
-          purpose: { type: "string", enum: shotStructure.map((shot) => shot.purpose) },
+          shotNumber: { type: "integer" }, sceneNumber: { type: "integer" }, startTime: { type: "integer" }, endTime: { type: "integer" },
+          narrativeBeat: { type: "string" }, purpose: { type: "string" },
           displayVisual: { type: "string" }, displayCamera: { type: "string" }, displayAction: { type: "string" },
           visualDescription: { type: "string" }, subjectAction: { type: "string" }, cameraFraming: { type: "string" },
           cameraAngle: { type: "string" }, lensSuggestion: { type: "string" }, cameraMovement: { type: "string" },
           lighting: { type: "string" }, audio: { type: "string" }, voiceoverOrDialogue: { type: "string" },
-          productPresence: { type: "string" }, locationAndProps: { type: "string" },
+          productPresence: { type: "string" }, locationAndProps: { type: "string" }, productAction: { type: "string" }, performanceDirection: { type: "string" }, focusBehaviour: { type: "string" }, copyOrDialogue: { type: "string" }, audioIntent: { type: "string" }, transitionIntent: { type: "string" },
           motionDirection: {
             type: "object", additionalProperties: false, required: [...motionFields, "motionIntensity"],
             properties: { ...Object.fromEntries(motionFields.map((field) => [field, { type: "string" }])), motionIntensity: { type: "string", enum: ["restrained", "moderate", "energetic"] } },
@@ -104,32 +97,38 @@ function parseGeneration(outputText: string): ModelGeneration | null {
       && isNonEmptyStringArray(bible.colorPalette, 4) && isNonEmptyStringArray(bible.continuityLocks);
     const brandValid = brand && brandBibleStringFields.every((field) => typeof brand[field] === "string") && brandBibleArrayFields.every((field) => Array.isArray(brand[field]));
     const grammarValid = grammar && grammarFields.every((field) => typeof grammar[field] === "string" && Boolean((grammar[field] as string).trim()));
-    if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !brandValid || !grammarValid || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length !== 6) return null;
-    const valid = parsed.shots.every((shot) => {
+    if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !brandValid || !grammarValid || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length < 4 || parsed.shots.length > 8) return null;
+    const valid = parsed.shots.every((shot, index) => {
       if (!shot || typeof shot !== "object") return false;
       const stringsComplete = requiredShotContentFields.every((field) => typeof shot[field] === "string" && shot[field].trim().length > 0)
         && typeof shot.voiceoverOrDialogue === "string";
       const motion = shot.motionDirection as unknown as Record<string, unknown> | undefined;
       const motionValid = motion && motionFields.every((field) => typeof motion[field] === "string" && Boolean((motion[field] as string).trim())) && ["restrained", "moderate", "energetic"].includes(String(motion.motionIntensity));
-      return stringsComplete && motionValid;
+      return stringsComplete && motionValid && shot.shotNumber === index + 1 && Number.isInteger(shot.sceneNumber) && Number.isInteger(shot.startTime) && Number.isInteger(shot.endTime) && shot.endTime > shot.startTime && (index === 0 ? shot.startTime === 0 : shot.startTime === parsed.shots![index - 1].endTime);
     });
-    if (!valid) return null;
+    if (!valid || parsed.shots.at(-1)?.endTime !== 30) return null;
     return {
       title: parsed.title,
       duration: parsed.duration,
+      brandBible: parsed.brandBible,
+      creativeGrammar: parsed.creativeGrammar,
       visualBible: parsed.visualBible,
-      shots: parsed.shots.map((shot, index) => ({ ...shot, ...shotStructure[index] })),
+      shots: parsed.shots,
     } as ModelGeneration;
   } catch {
     return null;
   }
 }
 
-async function makeGeneration({ brandProduct, audience, proposition, platform, visualTones, selectedConcept }: { brandProduct: string; audience: string; proposition: string; platform: string; visualTones: string[]; selectedConcept: Concept }) {
+async function makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount }: { intent: "performance" | "cinematic"; testObjective?: string; preserveDetails?: string; brandProduct: string; audience: string; proposition: string; platform: string; visualTones: string[]; selectedConcept: Concept; qaTargetShotCount?: number }) {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const response = await client.responses.create({
     model: "gpt-5-mini",
-    input: `You are the storyboard director of an elite advertising studio. Develop the approved creative concept into one coherent, shoot-ready 30-second advertisement.
+    reasoning: { effort: "minimal" },
+    input: `You are the narrative architect and storyboard director of an elite advertising studio. Develop the approved creative concept into one coherent, production-ready 30-second ${intent === "performance" ? "performance advertisement" : "cinematic visual story"}.
+
+INTENT
+${intent === "performance" ? "PERFORMANCE AD" : "CINEMATIC STORY"}
 
 BRAND
 ${brandProduct}
@@ -154,18 +153,18 @@ Story: ${selectedConcept.story}
 Product role: ${selectedConcept.productRole}
 Visual world: ${selectedConcept.visualWorld}
 Ending: ${selectedConcept.ending}
+${intent === "performance" ? `Creative mechanism: ${selectedConcept.creativeMechanism || selectedConcept.idea}\nProof mechanism: ${selectedConcept.proofMechanism || "Choose the most credible proof for the brief"}\nWhat this tests: ${selectedConcept.whatThisTests || testObjective}` : `Logline: ${selectedConcept.logline || selectedConcept.idea}\nHuman truth: ${selectedConcept.humanTruth || "Derive from the approved story"}\nMain character: ${selectedConcept.mainCharacter || "Derive from the approved story"}\nCentral conflict: ${selectedConcept.centralConflict || selectedConcept.story}\nEmotional arc: ${selectedConcept.emotionalArc || "Derive from the approved story"}\nCore message: ${selectedConcept.coreMessage || proposition}\nDetails to preserve: ${preserveDetails || "None supplied"}`}
 
-Generate exactly 6 shots using this narrative structure:
-
-Shot 1 — HOOK — 0–3 seconds
-Shot 2 — TENSION — 3–7 seconds
-Shot 3 — PRODUCT — 7–12 seconds
-Shot 4 — PROOF / ESCALATION — 12–18 seconds
-Shot 5 — PAYOFF — 18–25 seconds
-Shot 6 — BRAND ENDING — 25–30 seconds
+NARRATIVE ARCHITECTURE
+- Choose the structure that best serves this exact concept. Do not use a universal Hook/Tension/Product/Proof/Payoff/Brand template.
+- Choose between 4 and 8 shots. Use fewer shots when clarity and production economy improve; add shots only when the narrative needs them.
+${qaTargetShotCount ? `- PRODUCTION QA REQUIREMENT: Generate exactly ${qaTargetShotCount} shots while keeping the story coherent.` : ""}
+- The first shot starts at 0, the final shot ends at 30, timings are contiguous, and shot numbers are sequential.
+- narrativeBeat is a short human-readable name specific to that moment, not a forced template label.
+${intent === "performance" ? "- The complete sequence must accomplish attention, message, proof, and action. The selected test objective must materially shape the order, proof and opening." : "- Build a clear setup, conflict, turn and payoff appropriate to the story. Preserve dignity and specificity; avoid melodrama and stereotypes."}
 
 CONTINUITY RULES
-- All six shots must feel like scenes from one commercial, not six disconnected images.
+- All shots must feel like scenes from one film, not disconnected images.
 - Preserve the same character where applicable, including physical description and age.
 - Preserve the same wardrobe, product appearance, location logic, visual palette, and cinematic style.
 - Make the narrative action progress clearly from shot to shot.
@@ -183,7 +182,7 @@ VISUAL BIBLE
 - Lighting must define source, direction, softness, contrast, time of day, and practical lights.
 - Cinematography must define camera character, lens family, depth of field, framing philosophy, and movement style.
 - Texture must define skin, fabric, material, atmosphere, and film character.
-- Continuity locks must explicitly list everything that cannot change across the six shots.
+- Continuity locks must explicitly list everything that cannot change across the complete sequence.
 - Avoid plastic skin, inconsistent faces, random background objects, unnecessary neon, excessive bokeh, inconsistent wardrobe, inconsistent product shape, warped jewellery or products, and text inside images.
 
 BRAND BIBLE AND CREATIVE GRAMMAR
@@ -193,6 +192,7 @@ BRAND BIBLE AND CREATIVE GRAMMAR
 - Creative Grammar must define how this specific ad communicates: arc, hook, reveal, performance, edit rhythm, camera, copy, humour, audio, brand reveal, CTA and platform behaviour.
 
 SHOT DIRECTION
+- Every shot must depict exactly one continuous moment that can become one edge-to-edge production frame. Never put a match cut, before-and-after, multiple locations, or two moments inside one shot's visualDescription, displayVisual, subjectAction, or productAction. transitionIntent may describe the cut to the next shot, but the current frame must remain a single moment.
 - displayVisual must be one plain, filmable sentence of roughly 8–20 words.
 - displayCamera must be one concise instruction combining framing, lens, and movement, such as "85mm close-up · slow push-in".
 - displayAction must be one concise, physical action sentence.
@@ -203,13 +203,32 @@ SHOT DIRECTION
 - For every shot, locationAndProps must specify only the set dressing and props visible in that frame while staying inside the shared location logic.
 - Vary action, framing, angle, lens, and movement so the sequence progresses visually.
 - Do not write final image prompts. The application constructs them from the shared Visual Bible and shot direction.
+- sceneNumber groups shots that share one dramatic scene. productAction, performanceDirection, focusBehaviour, audioIntent, copyOrDialogue and transitionIntent must be concise and useful; use "None" when genuinely not applicable.
+
+${proofSafetyInstruction}
 
 Return only the structured storyboard.`,
     text: { format: { type: "json_schema", name: "concept_led_storyboard", strict: true, schema: outputSchema } },
   });
-  const modelGeneration = parseGeneration(response.output_text);
+  let modelGeneration = parseGeneration(response.output_text);
   if (!modelGeneration) return null;
+  const suppliedSource = [brandProduct, audience, proposition, testObjective, preserveDetails].filter(Boolean).join("\n");
+  const proofIssues = findUnsupportedProof(modelGeneration, suppliedSource);
+  if (proofIssues.length) {
+    const repaired = await client.responses.create({
+      model: "gpt-5-mini",
+      reasoning: { effort: "minimal" },
+      instructions: `You are a strict advertising compliance editor. Repair the supplied storyboard without changing its concept, shot count, timings, narrative beats, or visual continuity.\n\n${proofSafetyInstruction}`,
+      input: `USER-SUPPLIED SOURCE OF TRUTH\n${suppliedSource}\n\nUNSUPPORTED PROOF FOUND\n${proofIssues.join(", ")}\n\nSTORYBOARD TO REPAIR\n${JSON.stringify(modelGeneration)}\n\nReturn the complete repaired storyboard.`,
+      text: { format: { type: "json_schema", name: "repaired_concept_led_storyboard", strict: true, schema: outputSchema } },
+    });
+    modelGeneration = parseGeneration(repaired.output_text);
+    if (!modelGeneration || findUnsupportedProof(modelGeneration, suppliedSource).length) return null;
+  }
   const sharedPromptContext = {
+    intent,
+    selectedConcept: selectedConcept.idea,
+    narrativeStructure: modelGeneration.shots.map((shot) => `${shot.shotNumber}. ${shot.narrativeBeat}`).join(" → "),
     storyContext: selectedConcept.story,
     selectedTone: visualTones.join(", "),
     platform,
@@ -231,11 +250,17 @@ export async function POST(request: Request) {
   catch { return NextResponse.json({ error: "The storyboard brief could not be read. Please try again." }, { status: 400 }); }
 
   const brandProduct = body.brandProduct?.trim();
+  const runId = body.runId?.trim();
+  const intent = body.intent === "cinematic" ? "cinematic" : "performance";
+  const testObjective = body.testObjective === "Other" ? body.testObjectiveOther?.trim() : body.testObjective?.trim();
+  const preserveDetails = body.preserveDetails?.trim();
   const audience = body.audience?.trim();
   const proposition = body.proposition?.trim();
   const platform = body.platform?.trim();
   const visualTones = body.visualTones?.map((tone) => tone.trim()).filter(Boolean);
   const selectedConcept = body.selectedConcept;
+  const requestedQaCount = Number.isInteger(body.qaTargetShotCount) && body.qaTargetShotCount! >= 4 && body.qaTargetShotCount! <= 8 ? body.qaTargetShotCount : undefined;
+  const qaTargetShotCount = requestedQaCount && process.env.FRAME_QA_TOKEN && request.headers.get("x-frame-qa-token") === process.env.FRAME_QA_TOKEN ? requestedQaCount : undefined;
 
   if (!brandProduct || !audience || !proposition || !platform || !visualTones?.length) return NextResponse.json({ error: "Please complete the current creative brief." }, { status: 400 });
   if (!platforms.includes(platform)) return NextResponse.json({ error: "Choose one of the available platforms." }, { status: 400 });
@@ -243,16 +268,28 @@ export async function POST(request: Request) {
   if (!isConcept(selectedConcept)) return NextResponse.json({ error: "Choose a complete creative direction before generating the storyboard." }, { status: 400 });
   if (!process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Add OPENAI_API_KEY before generating the storyboard." }, { status: 500 });
 
+  if (runId && process.env.NEXT_PUBLIC_CONVEX_URL) {
+    try { await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL).mutation(anyApi.runs.setStage, { id: runId, status: "storyboard_generating", step: "Building the storyboard" }); } catch (error) { console.warn("Run storyboard status could not be saved", error); }
+  }
+
   let generation: Generation | null;
-  try { generation = await makeGeneration({ brandProduct, audience, proposition, platform, visualTones, selectedConcept }); }
+  try { generation = await makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount }); }
   catch (error) {
     console.error("OpenAI storyboard generation failed", error);
     const kind = classifyOpenAIError(error);
+    if (runId && process.env.NEXT_PUBLIC_CONVEX_URL) {
+      try { await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard could not be built." }); } catch { /* Preserve the generation error response. */ }
+    }
     if (kind === "rate_limit") return NextResponse.json({ error: "We're receiving too many generation requests. Try again shortly." }, { status: 429 });
     if (kind === "quota" || kind === "configuration") return NextResponse.json({ error: "Storyboard generation is not available for this project right now." }, { status: 503 });
     return NextResponse.json({ error: "We couldn't build the storyboard. Try again." }, { status: 502 });
   }
-  if (!generation) return NextResponse.json({ error: "The storyboard came back incomplete. Please generate it again." }, { status: 502 });
+  if (!generation) {
+    if (runId && process.env.NEXT_PUBLIC_CONVEX_URL) {
+      try { await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard came back incomplete." }); } catch { /* Preserve the generation error response. */ }
+    }
+    return NextResponse.json({ error: "The storyboard came back incomplete. Please generate it again." }, { status: 502 });
+  }
 
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
   if (!convexUrl) {
@@ -261,7 +298,8 @@ export async function POST(request: Request) {
   }
   try {
     const client = new ConvexHttpClient(convexUrl);
-    const generationId = await client.mutation(anyApi.generations.save, { brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) });
+    const generationId = await client.mutation(anyApi.generations.save, { intent, testObjective: body.testObjective?.trim(), testObjectiveOther: body.testObjectiveOther?.trim(), preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) });
+    if (runId) await client.mutation(anyApi.runs.setStage, { id: runId, status: "images_generating", step: `Drawing frame 1 of ${generation.shots.length}`, currentCount: 0, totalCount: generation.shots.length, generationId });
     return NextResponse.json({ generation, generationId, saved: true });
   } catch (error) {
     console.warn("Storyboard generated but Convex persistence failed", error);

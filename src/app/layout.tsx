@@ -1,4 +1,4 @@
 import type { Metadata } from "next";
 import "./globals.css";
-export const metadata: Metadata = { title: "Frame — Concept-led storyboards for 30-second ads", description: "Turn your product, audience, and single-minded proposition into one coherent six-shot commercial." };
+export const metadata: Metadata = { title: "FRAME — AI creative studio", description: "Turn a brief into original creative direction and a production-ready visual treatment." };
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) { return <html lang="en"><body>{children}</body></html>; }

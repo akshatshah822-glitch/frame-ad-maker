@@ -1,0 +1,86 @@
+[
+  {
+    "name": "performance-5-shot",
+    "generationId": "j5713m30rfxwm5fyzcm09rf9z18dfjv9",
+    "treatmentUrl": "https://frame-ad-maker.vercel.app/treatment/j5713m30rfxwm5fyzcm09rf9z18dfjv9",
+    "shotCount": 5,
+    "renderResults": [
+      {
+        "retried": false,
+        "reconciled": false
+      },
+      {
+        "retried": true,
+        "reconciled": false
+      },
+      {
+        "retried": false,
+        "reconciled": false
+      },
+      {
+        "retried": false,
+        "reconciled": false
+      },
+      {
+        "retried": false,
+        "reconciled": false
+      }
+    ],
+    "pageEvidence": {
+      "shots": 5,
+      "images": 5,
+      "videoGate": 0,
+      "copied": true,
+      "shared": true,
+      "pdfStatus": 200,
+      "pdfType": "application/pdf",
+      "mobileOverflow": false
+    }
+  },
+  {
+    "name": "cinematic-7-shot",
+    "generationId": "j57fywe1gt6nqje0mcs4grxgqh8de6qa",
+    "treatmentUrl": "https://frame-ad-maker.vercel.app/treatment/j57fywe1gt6nqje0mcs4grxgqh8de6qa",
+    "shotCount": 7,
+    "renderResults": [
+      {
+        "retried": false,
+        "reconciled": false
+      },
+      {
+        "retried": true,
+        "reconciled": false
+      },
+      {
+        "retried": false,
+        "reconciled": false
+      },
+      {
+        "retried": false,
+        "reconciled": false
+      },
+      {
+        "retried": false,
+        "reconciled": false
+      },
+      {
+        "retried": false,
+        "reconciled": false
+      },
+      {
+        "retried": false,
+        "reconciled": false
+      }
+    ],
+    "pageEvidence": {
+      "shots": 7,
+      "images": 7,
+      "videoGate": 0,
+      "copied": true,
+      "shared": true,
+      "pdfStatus": 200,
+      "pdfType": "application/pdf",
+      "mobileOverflow": false
+    }
+  }
+]

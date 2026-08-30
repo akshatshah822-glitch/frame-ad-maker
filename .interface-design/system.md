@@ -94,7 +94,7 @@ FRAME should feel like a focused creative director's workbench: editorial, preci
 
 - The result screen should feel like a commercial treatment being presented for approval, not an AI response or dashboard.
 - Lead with the selected concept name and its one-line central idea. Keep duration and platform as compact production metadata.
-- Present the six shots in one fixed narrative order: `01 Hook`, `02 Tension`, `03 Product`, `04 Proof`, `05 Payoff`, `06 Brand`.
+- Present 4–8 shots in the narrative order chosen by the creative engine. Use each shot's own narrative beat; do not impose one fixed structure.
 - Use two columns above `750px` and one column below it.
 - Each shot begins with a dominant `16:9` frame well with a sharp ink border and `6px` blueprint offset shadow (`4px` on mobile).
 - When a real image URL exists, fill the frame with the image using cover cropping. Never imply that a visual placeholder is a generated image.
@@ -105,7 +105,7 @@ FRAME should feel like a focused creative director's workbench: editorial, preci
 - Do not expose raw image-generation prompts by default.
 - Do not add shot-directing controls until that workflow is explicitly designed.
 - Image rendering states stay inside each frame: waiting, directing, completed image, or a local failure with an explicit `Retry frame` action.
-- During the six-frame render queue, use one compact studio-status strip with real stage copy. Never display invented percentages.
+- During the frame render queue, use one compact studio-status strip with real stage copy. Never display invented percentages.
 - Match the visible frame shape to platform intent: `9:16` for Reels, `4:5` for Meta Ads, and `16:9` for YouTube and TV / OTT.
 - Completed treatments lead with Copy treatment, then Download PDF and Share link. Make another film is tertiary.
 - All important controls use an effective minimum hit area of `44px` on touch screens.

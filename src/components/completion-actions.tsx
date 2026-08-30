@@ -8,6 +8,7 @@ import type { TreatmentData } from "@/lib/types";
 type Props = {
   treatment: TreatmentData;
   onRestart?: () => void;
+  filmReady?: boolean;
 };
 
 async function copyText(value: string) {
@@ -27,7 +28,7 @@ async function copyText(value: string) {
   if (!copied) throw new Error("Copy is unavailable");
 }
 
-export function CompletionActions({ treatment, onRestart }: Props) {
+export function CompletionActions({ treatment, onRestart, filmReady = false }: Props) {
   const [notice, setNotice] = useState("");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shareUrl = treatment.id && typeof window !== "undefined" ? `${window.location.origin}/treatment/${treatment.id}` : "";
@@ -67,7 +68,7 @@ export function CompletionActions({ treatment, onRestart }: Props) {
       <button className="primary-button" type="button" onClick={copyTreatment}>Copy treatment <span aria-hidden="true">↗</span></button>
       {treatment.id ? <a className="export-button" href={`/api/treatments/${treatment.id}/pdf`} download>Download PDF</a> : <button className="export-button" type="button" disabled title="PDF needs a saved treatment">Download PDF</button>}
       <button className="export-button" type="button" onClick={copyShareLink} aria-disabled={!treatment.id}>Share link</button>
-      {onRestart ? <button className="restart-button" type="button" onClick={onRestart}>Make another film</button> : <Link className="restart-button" href="/">Make a film</Link>}
+      {!filmReady ? (onRestart ? <button className="restart-button" type="button" onClick={onRestart}>Make another</button> : <Link className="restart-button" href="/">Make another</Link>) : null}
     </div>
     <p className="action-notice" role="status" aria-live="polite">{notice}</p>
   </div>;
