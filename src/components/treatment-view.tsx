@@ -5,7 +5,7 @@ import Link from "next/link";
 import { getPlatformFormat } from "@/lib/image-prompt";
 import { getShotDisplay, hasDialogue } from "@/lib/treatment";
 import type { AppPhase, Shot, TreatmentData, VideoProduction as Production } from "@/lib/types";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CompletionActions } from "@/components/completion-actions";
 import { VideoProduction } from "@/components/video-production";
 import { BlockedShotRetry } from "@/components/blocked-shot-retry";
@@ -45,6 +45,17 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
     video?.scrollIntoView({ behavior: "smooth", block: "center" });
     void video?.play();
   };
+
+  useEffect(() => {
+    const pending = generation.shots.filter((shot) => shot.imageUrl && !loadedImages.has(shot.shotNumber) && !failedImageLoads.has(shot.shotNumber));
+    if (!pending.length) return;
+    const timer = window.setTimeout(() => setFailedImageLoads((current) => {
+      const next = new Set(current);
+      pending.forEach((shot) => next.add(shot.shotNumber));
+      return next;
+    }), 45_000);
+    return () => window.clearTimeout(timer);
+  }, [failedImageLoads, generation.shots, loadedImages]);
 
   return <main className="page result-page">
     <header className="topbar">{onRestart ? <button className="wordmark" type="button" onClick={onRestart}>FRAME<span>{"///"}</span></button> : <Link className="wordmark" href="/">FRAME<span>{"///"}</span></Link>}<span>30 sec ad maker</span>{onRestart ? <button className="new-button" type="button" onClick={onRestart}>Start over</button> : <Link className="new-button" href="/">Create your own</Link>}</header>
