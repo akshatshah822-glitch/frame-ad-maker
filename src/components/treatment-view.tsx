@@ -27,6 +27,7 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
   const [videoProduction, setVideoProduction] = useState(initialVideoProduction);
   const [loadedImages, setLoadedImages] = useState<Set<number>>(() => new Set());
   const [failedImageLoads, setFailedImageLoads] = useState<Set<number>>(() => new Set());
+  const [imageLoadAttempts, setImageLoadAttempts] = useState<Record<number, number>>({});
   const { brief, concept, generation } = treatment;
   const totalFrames = generation.shots.length;
   const completeCount = generation.shots.filter((shot) => shot.imageStatus === "complete").length;
@@ -49,13 +50,18 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
   useEffect(() => {
     const pending = generation.shots.filter((shot) => shot.imageUrl && !loadedImages.has(shot.shotNumber) && !failedImageLoads.has(shot.shotNumber));
     if (!pending.length) return;
-    const timer = window.setTimeout(() => setFailedImageLoads((current) => {
-      const next = new Set(current);
-      pending.forEach((shot) => next.add(shot.shotNumber));
-      return next;
-    }), 45_000);
+    const timer = window.setTimeout(() => {
+      const retryable = pending.filter((shot) => (imageLoadAttempts[shot.shotNumber] ?? 0) < 2);
+      const exhausted = pending.filter((shot) => (imageLoadAttempts[shot.shotNumber] ?? 0) >= 2);
+      if (retryable.length) setImageLoadAttempts((current) => {
+        const next = { ...current };
+        retryable.forEach((shot) => { next[shot.shotNumber] = (current[shot.shotNumber] ?? 0) + 1; });
+        return next;
+      });
+      if (exhausted.length) setFailedImageLoads((current) => new Set([...current, ...exhausted.map((shot) => shot.shotNumber)]));
+    }, 45_000);
     return () => window.clearTimeout(timer);
-  }, [failedImageLoads, generation.shots, loadedImages]);
+  }, [failedImageLoads, generation.shots, imageLoadAttempts, loadedImages]);
 
   return <main className="page result-page">
     <header className="topbar">{onRestart ? <button className="wordmark" type="button" onClick={onRestart}>FRAME<span>{"///"}</span></button> : <Link className="wordmark" href="/">FRAME<span>{"///"}</span></Link>}<span>30 sec ad maker</span>{onRestart ? <button className="new-button" type="button" onClick={onRestart}>Start over</button> : <Link className="new-button" href="/">Create your own</Link>}</header>
@@ -70,7 +76,7 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
       const display = getShotDisplay(shot);
       return <article className="treatment-shot" key={shot.shotNumber}>
         <figure className="shot-frame" data-format={getPlatformFormat(brief.platform)} data-status={shot.imageStatus}>
-          {shot.imageUrl && !failedImageLoads.has(shot.shotNumber) ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${display.visual}`} fill sizes="(max-width: 750px) 100vw, 50vw" priority={index < 2} unoptimized crossOrigin="anonymous" data-storyboard-frame onLoad={() => setLoadedImages((current) => current.has(shot.shotNumber) ? current : new Set(current).add(shot.shotNumber))} onError={() => setFailedImageLoads((current) => new Set(current).add(shot.shotNumber))} /> : ((shot.imageStatus === "blocked" || shot.imageStatus === "failed" || failedImageLoads.has(shot.shotNumber)) && treatment.id) ? <BlockedShotRetry shot={failedImageLoads.has(shot.shotNumber) ? { ...shot, imageStatus: "failed", imageError: "This frame could not be loaded. Generate this shot again." } : shot} generationId={treatment.id} platform={brief.platform} totalShots={totalFrames} /> : shot.imageStatus === "failed" ? <div className="shot-frame-failed"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.imageError ?? "This frame couldn't be rendered."}</p>{onRetryShot ? <button type="button" onClick={() => onRetryShot(shot)}>Retry frame</button> : null}</div> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><small>{shot.imageStatus === "generating" ? "Directing this frame…" : "Waiting for direction"}</small></div>}
+          {shot.imageUrl && !failedImageLoads.has(shot.shotNumber) ? <Image key={`${shot.imageUrl}:${imageLoadAttempts[shot.shotNumber] ?? 0}`} src={`${shot.imageUrl}${shot.imageUrl.includes("?") ? "&" : "?"}frame_retry=${imageLoadAttempts[shot.shotNumber] ?? 0}`} alt={`Shot ${shot.shotNumber}: ${display.visual}`} fill sizes="(max-width: 750px) 100vw, 50vw" priority={index < 2} unoptimized crossOrigin="anonymous" data-storyboard-frame onLoad={() => setLoadedImages((current) => current.has(shot.shotNumber) ? current : new Set(current).add(shot.shotNumber))} onError={() => (imageLoadAttempts[shot.shotNumber] ?? 0) < 2 ? setImageLoadAttempts((current) => ({ ...current, [shot.shotNumber]: (current[shot.shotNumber] ?? 0) + 1 })) : setFailedImageLoads((current) => new Set(current).add(shot.shotNumber))} /> : ((shot.imageStatus === "blocked" || shot.imageStatus === "failed" || failedImageLoads.has(shot.shotNumber)) && treatment.id) ? <BlockedShotRetry shot={failedImageLoads.has(shot.shotNumber) ? { ...shot, imageStatus: "failed", imageError: "This frame could not be loaded after three attempts. Generate this shot again." } : shot} generationId={treatment.id} platform={brief.platform} totalShots={totalFrames} /> : shot.imageStatus === "failed" ? <div className="shot-frame-failed"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.imageError ?? "This frame couldn't be rendered."}</p>{onRetryShot ? <button type="button" onClick={() => onRetryShot(shot)}>Retry frame</button> : null}</div> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><small>{shot.imageStatus === "generating" ? "Directing this frame…" : "Waiting for direction"}</small></div>}
         </figure>
         <header className="shot-heading"><div><span>{String(shot.shotNumber).padStart(2, "0")}</span><h2>{shot.narrativeBeat || shot.purpose}</h2></div><time>{shot.startTime}–{shot.endTime} sec</time></header>
         <div className="shot-summary">
