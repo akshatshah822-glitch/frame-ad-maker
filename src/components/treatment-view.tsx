@@ -25,17 +25,21 @@ type Props = {
 
 export function TreatmentView({ treatment, phase = "storyboard_ready", saved = true, currentShot, progressStep, progressElapsed = 0, onRetryShot, onRestart, initialVideoProduction = null, showVideoProduction = false }: Props) {
   const [videoProduction, setVideoProduction] = useState(initialVideoProduction);
+  const [loadedImages, setLoadedImages] = useState<Set<number>>(() => new Set());
+  const [failedImageLoads, setFailedImageLoads] = useState<Set<number>>(() => new Set());
   const { brief, concept, generation } = treatment;
   const totalFrames = generation.shots.length;
   const completeCount = generation.shots.filter((shot) => shot.imageStatus === "complete").length;
+  const loadedCount = generation.shots.filter((shot) => shot.imageUrl && loadedImages.has(shot.shotNumber)).length;
   const availableImageCount = generation.shots.filter((shot) => Boolean(shot.imageUrl)).length;
-  const failedCount = generation.shots.filter((shot) => shot.imageStatus === "failed" || shot.imageStatus === "blocked").length;
-  const ready = phase === "storyboard_ready" && completeCount === totalFrames;
+  const failedCount = generation.shots.filter((shot) => shot.imageStatus === "failed" || shot.imageStatus === "blocked" || failedImageLoads.has(shot.shotNumber)).length;
+  const ready = phase === "storyboard_ready" && completeCount === totalFrames && loadedCount === totalFrames;
   const incomplete = phase === "storyboard_incomplete" || (phase === "storyboard_ready" && completeCount < totalFrames);
-  const working = phase === "storyboard_generating" || phase === "images_generating";
+  const loadingImages = completeCount === totalFrames && loadedCount < totalFrames && failedImageLoads.size === 0;
+  const working = phase === "storyboard_generating" || phase === "images_generating" || loadingImages;
   const filmReady = videoProduction?.status === "ready" && Boolean(videoProduction.finalVideoUrl);
-  const statusTitle = filmReady ? "FILM READY" : ready ? "STORYBOARD READY" : incomplete ? `STORYBOARD INCOMPLETE · ${completeCount}/${totalFrames} FRAMES` : phase === "images_generating" ? `GENERATING ${completeCount} OF ${totalFrames}` : phase === "storyboard_generating" ? "DEVELOPING THE VISUAL WORLD" : "BUILDING THE STORYBOARD";
-  const statusCopy = filmReady ? "Your finished film is ready to watch and share." : ready ? "Your treatment and all frames are ready to share." : incomplete ? `${failedCount} ${failedCount === 1 ? "frame needs" : "frames need"} attention. Retry only the affected frame below.` : `${progressStep || (currentShot ? `Drawing frame ${currentShot} of ${totalFrames}` : "Building the storyboard")} · ${progressElapsed}s elapsed`;
+  const statusTitle = filmReady ? "FILM READY" : ready ? "STORYBOARD READY" : incomplete || failedImageLoads.size ? `STORYBOARD INCOMPLETE · ${loadedCount}/${totalFrames} FRAMES` : phase === "images_generating" || loadingImages ? `GENERATING ${loadedCount} OF ${totalFrames}` : phase === "storyboard_generating" ? "DEVELOPING THE VISUAL WORLD" : "BUILDING THE STORYBOARD";
+  const statusCopy = filmReady ? "Your finished film is ready to watch and share." : ready ? "Your treatment and all frames are ready to share." : incomplete || failedImageLoads.size ? `${failedCount} ${failedCount === 1 ? "frame needs" : "frames need"} attention. Retry only the affected frame below.` : `${progressStep || (currentShot ? `Drawing frame ${currentShot} of ${totalFrames}` : "Loading the storyboard frames")} · ${progressElapsed}s elapsed`;
   const playFilm = () => {
     const video = document.querySelector<HTMLVideoElement>(".final-ad video");
     video?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -55,7 +59,7 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
       const display = getShotDisplay(shot);
       return <article className="treatment-shot" key={shot.shotNumber}>
         <figure className="shot-frame" data-format={getPlatformFormat(brief.platform)} data-status={shot.imageStatus}>
-          {shot.imageUrl ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${display.visual}`} fill sizes="(max-width: 750px) 100vw, 50vw" priority={index < 2} unoptimized crossOrigin="anonymous" data-storyboard-frame /> : (shot.imageStatus === "blocked" || shot.imageStatus === "failed") && treatment.id ? <BlockedShotRetry shot={shot} generationId={treatment.id} platform={brief.platform} totalShots={totalFrames} /> : shot.imageStatus === "failed" ? <div className="shot-frame-failed"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.imageError ?? "This frame couldn't be rendered."}</p>{onRetryShot ? <button type="button" onClick={() => onRetryShot(shot)}>Retry frame</button> : null}</div> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><small>{shot.imageStatus === "generating" ? "Directing this frame…" : "Waiting for direction"}</small></div>}
+          {shot.imageUrl && !failedImageLoads.has(shot.shotNumber) ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${display.visual}`} fill sizes="(max-width: 750px) 100vw, 50vw" priority={index < 2} unoptimized crossOrigin="anonymous" data-storyboard-frame onLoad={() => setLoadedImages((current) => current.has(shot.shotNumber) ? current : new Set(current).add(shot.shotNumber))} onError={() => setFailedImageLoads((current) => new Set(current).add(shot.shotNumber))} /> : ((shot.imageStatus === "blocked" || shot.imageStatus === "failed" || failedImageLoads.has(shot.shotNumber)) && treatment.id) ? <BlockedShotRetry shot={failedImageLoads.has(shot.shotNumber) ? { ...shot, imageStatus: "failed", imageError: "This frame could not be loaded. Generate this shot again." } : shot} generationId={treatment.id} platform={brief.platform} totalShots={totalFrames} /> : shot.imageStatus === "failed" ? <div className="shot-frame-failed"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.imageError ?? "This frame couldn't be rendered."}</p>{onRetryShot ? <button type="button" onClick={() => onRetryShot(shot)}>Retry frame</button> : null}</div> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><small>{shot.imageStatus === "generating" ? "Directing this frame…" : "Waiting for direction"}</small></div>}
         </figure>
         <header className="shot-heading"><div><span>{String(shot.shotNumber).padStart(2, "0")}</span><h2>{shot.narrativeBeat || shot.purpose}</h2></div><time>{shot.startTime}–{shot.endTime} sec</time></header>
         <div className="shot-summary">
