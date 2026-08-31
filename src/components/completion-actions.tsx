@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { formatTreatmentText } from "@/lib/treatment";
 import type { TreatmentData } from "@/lib/types";
+import { StoryboardVideoDownload } from "@/components/storyboard-video-download";
 
 type Props = {
   treatment: TreatmentData;
   onRestart?: () => void;
   filmReady?: boolean;
+  canDownloadVideo?: boolean;
 };
 
 async function copyText(value: string) {
@@ -28,7 +30,7 @@ async function copyText(value: string) {
   if (!copied) throw new Error("Copy is unavailable");
 }
 
-export function CompletionActions({ treatment, onRestart, filmReady = false }: Props) {
+export function CompletionActions({ treatment, onRestart, filmReady = false, canDownloadVideo = false }: Props) {
   const [notice, setNotice] = useState("");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shareUrl = treatment.id && typeof window !== "undefined" ? `${window.location.origin}/treatment/${treatment.id}` : "";
@@ -67,6 +69,7 @@ export function CompletionActions({ treatment, onRestart, filmReady = false }: P
     <div className="completion-actions" aria-label="Treatment actions">
       <button className="primary-button" type="button" onClick={copyTreatment}>Copy treatment <span aria-hidden="true">↗</span></button>
       {treatment.id ? <a className="export-button" href={`/api/treatments/${treatment.id}/pdf`} download>Download PDF</a> : <button className="export-button" type="button" disabled title="PDF needs a saved treatment">Download PDF</button>}
+      {canDownloadVideo ? <StoryboardVideoDownload /> : null}
       <button className="export-button" type="button" onClick={copyShareLink} aria-disabled={!treatment.id}>Share link</button>
       {!filmReady ? (onRestart ? <button className="restart-button" type="button" onClick={onRestart}>Make another</button> : <Link className="restart-button" href="/">Make another</Link>) : null}
     </div>
