@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { RealVideoRequest } from "@/components/real-video-request";
 
 const WIDTH = 1080;
 const HEIGHT = 1920;
@@ -124,7 +125,7 @@ async function recordStoryboardVideo() {
   }
 }
 
-export function StoryboardVideoDownload() {
+export function StoryboardVideoDownload({ storyboardId }: { storyboardId?: string }) {
   const [buttonText, setButtonText] = useState("DOWNLOAD 30S VIDEO");
   const recording = buttonText === "RECORDING 30S…";
 
@@ -138,5 +139,8 @@ export function StoryboardVideoDownload() {
     }
   }
 
-  return <button className="export-button" type="button" disabled={recording} onClick={download}>{buttonText}</button>;
+  return <div className="animatic-actions">
+    <button className="export-button" type="button" disabled={recording} onClick={download}>{buttonText}</button>
+    <RealVideoRequest storyboardId={storyboardId} />
+  </div>;
 }

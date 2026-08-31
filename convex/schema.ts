@@ -7,6 +7,12 @@ export default defineSchema({
     source: v.string(),
     createdAt: v.number(),
   }).index("by_email", ["email"]),
+  videoRequests: defineTable({
+    email: v.string(),
+    brandName: v.string(),
+    storyboardId: v.id("generations"),
+    createdAt: v.number(),
+  }).index("by_storyboard", ["storyboardId"]).index("by_email", ["email"]),
   runs: defineTable({
     clientId: v.string(),
     brief: v.string(),

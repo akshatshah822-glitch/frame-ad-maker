@@ -12,6 +12,7 @@ import type * as generations from "../generations.js";
 import type * as runs from "../runs.js";
 import type * as signups from "../signups.js";
 import type * as videoProductions from "../videoProductions.js";
+import type * as videoRequests from "../videoRequests.js";
 
 import type {
   ApiFromModules,
@@ -24,6 +25,7 @@ declare const fullApi: ApiFromModules<{
   runs: typeof runs;
   signups: typeof signups;
   videoProductions: typeof videoProductions;
+  videoRequests: typeof videoRequests;
 }>;
 
 /**

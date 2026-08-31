@@ -72,6 +72,17 @@ test("shared treatment exposes concise cards, details, copy, share, and PDF", as
   expect((await response.body()).subarray(0, 4).toString()).toBe("%PDF");
 });
 
+test("real-video request saves and confirms from a completed treatment", async ({ page }) => {
+  await page.goto(`/treatment/${treatmentId}`);
+  await page.getByRole("button", { name: "Get this as a real video, ₹200, delivered in 24h" }).click();
+  await page.getByLabel("Email").fill("codex-video-request-test@example.com");
+  await page.getByLabel("Brand name").fill("FRAME E2E TEST");
+  await expect(page.getByLabel("Storyboard ID")).toHaveValue(treatmentId);
+  await page.getByRole("button", { name: "REQUEST REAL VIDEO" }).click();
+  await expect(page.getByText("REQUEST RECEIVED")).toBeVisible();
+  await expect(page.getByText("We’ll email you about your 24-hour video delivery.")).toBeVisible();
+});
+
 test("one failed frame ends in an accurate usable completion state", async ({ page }) => {
   const concept = { conceptName: "The Quiet Reset", idea: "One sip restores order to a noisy afternoon.", hook: "A desk freezes mid-chaos.", story: "A tired team pauses. The product resets the room. Work resumes with clarity.", productRole: "The product creates the reset.", visualWorld: "A tactile office in warm afternoon light.", ending: "The room moves in rhythm again." };
   await page.route("**/api/concepts", (route) => route.fulfill({ json: { concepts: [concept, { ...concept, conceptName: "Made With Patience" }, { ...concept, conceptName: "Pause Button" }] } }));

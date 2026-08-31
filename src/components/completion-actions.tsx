@@ -69,7 +69,7 @@ export function CompletionActions({ treatment, onRestart, filmReady = false, can
     <div className="completion-actions" aria-label="Treatment actions">
       <button className="primary-button" type="button" onClick={copyTreatment}>Copy treatment <span aria-hidden="true">↗</span></button>
       {treatment.id ? <a className="export-button" href={`/api/treatments/${treatment.id}/pdf`} download>Download PDF</a> : <button className="export-button" type="button" disabled title="PDF needs a saved treatment">Download PDF</button>}
-      {canDownloadVideo ? <StoryboardVideoDownload /> : null}
+      {canDownloadVideo ? <StoryboardVideoDownload storyboardId={treatment.id} /> : null}
       <button className="export-button" type="button" onClick={copyShareLink} aria-disabled={!treatment.id}>Share link</button>
       {!filmReady ? (onRestart ? <button className="restart-button" type="button" onClick={onRestart}>Make another</button> : <Link className="restart-button" href="/">Make another</Link>) : null}
     </div>

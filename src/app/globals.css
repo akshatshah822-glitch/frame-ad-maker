@@ -313,6 +313,20 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .restart-button { border-color:transparent; color:var(--muted); text-decoration:underline; text-underline-offset:4px; }
 .export-button:disabled { opacity:.42; cursor:not-allowed; }
 .video-download-error { align-self:center; max-width:180px; color:#a72d21; font-size:9px; line-height:1.35; }
+.animatic-actions { display:grid; gap:8px; width:min(100%,330px); }
+.animatic-actions>.export-button { width:100%; }
+.real-video-request { display:grid; gap:8px; }
+.real-video-cta { min-height:44px; border:1px solid var(--ink); background:var(--coral); color:var(--ink); padding:10px 12px; font-size:9px; font-weight:900; line-height:1.35; text-transform:uppercase; cursor:pointer; }
+.real-video-request form { display:grid; gap:10px; padding:14px; border:1px solid var(--ink); background:var(--panel); box-shadow:4px 4px 0 var(--blue); }
+.real-video-request label { display:grid; gap:5px; color:var(--muted); font-size:8px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+.real-video-request input { min-width:0; min-height:40px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); padding:8px 0; font:inherit; letter-spacing:0; text-transform:none; }
+.real-video-request input:focus { border-color:var(--coral); outline:0; }
+.real-video-request input[readonly] { color:var(--muted); font-size:8px; }
+.real-video-request .video-primary { min-height:44px; }
+.real-video-request p { margin:0; color:#a72d21; font-size:10px; line-height:1.4; }
+.real-video-confirmation { display:grid; gap:4px; padding:12px; border:1px solid var(--ink); background:var(--coral); color:var(--ink); }
+.real-video-confirmation strong { font-size:9px; letter-spacing:.12em; }
+.real-video-confirmation span { font-size:10px; line-height:1.4; }
 .action-notice { min-height:16px; margin:7px 0 0; color:var(--muted); font-size:10px; text-align:right; }
 .shot-summary { display:grid; }
 .shot-summary section { display:grid; grid-template-columns:78px 1fr; gap:14px; padding:14px 0; border-bottom:1px solid var(--line); }
