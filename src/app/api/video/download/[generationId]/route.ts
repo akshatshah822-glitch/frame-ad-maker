@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { treatmentVideoFilename } from "@/lib/filename";
 import { getTreatmentById } from "@/lib/treatment-data";
 import { getVideoProduction } from "@/lib/video-production";
+import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ generationId: string }> }) {
+const get = async (_request: Request, { params }: { params: Promise<{ generationId: string }> }) => {
   const { generationId } = await params;
   const [production, treatment] = await Promise.all([getVideoProduction(generationId), getTreatmentById(generationId)]);
   if (!production?.finalVideoUrl || production.status !== "ready" || !treatment) return NextResponse.json({ error: "This film is not ready to download." }, { status: 404 });
@@ -16,4 +17,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ gen
   const length = upstream.headers.get("content-length");
   if (length) headers.set("Content-Length", length);
   return new Response(upstream.body, { headers });
-}
+};
+
+export const GET = withJsonErrors(get);
+export const POST = methodNotAllowed(["GET"]);
+export const PUT = methodNotAllowed(["GET"]);
+export const PATCH = methodNotAllowed(["GET"]);
+export const DELETE = methodNotAllowed(["GET"]);
+export const OPTIONS = methodNotAllowed(["GET"]);

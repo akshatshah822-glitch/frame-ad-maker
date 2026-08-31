@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VideoProduction as Production } from "@/lib/types";
+import { track } from "@/lib/analytics";
+import { readJsonResponse } from "@/lib/read-json-response";
 
 type Props = { generationId?: string; posterUrl?: string; treatmentTitle?: string; initialProduction?: Production | null; onProductionChange?: (production: Production | null) => void };
 const shotNames = ["opening hook", "tension", "product reveal", "proof", "payoff", "brand frame"];
@@ -12,13 +14,14 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   const [error, setError] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const assemblyRequested = useRef(false);
+  const filmShown = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => { onProductionChange?.(production); }, [onProductionChange, production]);
 
   const call = useCallback(async (path: string, body: Record<string, unknown>) => {
     const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const payload = await response.json() as { production?: Production | null; error?: string };
+    const payload = await readJsonResponse<{ production?: Production | null; error?: string }>(response);
     if (!response.ok) throw new Error(payload.error || "Video production could not continue.");
     if (payload.production) setProduction(payload.production);
     return payload.production ?? null;
@@ -73,7 +76,7 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
     : Math.round(4 + clipProgress * 82);
   if (production.status === "ready" && production.finalVideoUrl) return <section className="final-ad" aria-labelledby="final-ad-title">
     <p className="eyebrow">Final film</p><h2 id="final-ad-title">Your ad is ready.</h2>
-    <video ref={videoRef} controls playsInline preload="metadata" poster={posterUrl} src={production.finalVideoUrl} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)}>Your browser cannot play this video.</video>
+    <video ref={videoRef} controls playsInline preload="metadata" poster={posterUrl} src={production.finalVideoUrl} onPlay={() => { setIsPlaying(true); if (!filmShown.current) { filmShown.current = true; track("film_shown", { treatmentId: generationId }); } }} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)}>Your browser cannot play this video.</video>
     <div className="final-ad-actions"><button className="video-primary" type="button" aria-label={isPlaying ? "Pause film" : "Play film"} onClick={() => { const video = videoRef.current; if (!video) return; if (video.paused) void video.play(); else video.pause(); }}>{isPlaying ? "Pause" : "Play"}</button><a className="export-button" href={`/api/video/download/${generationId}`} download>{treatmentTitle ? `Download ${treatmentTitle}` : "Download MP4"}</a></div>
   </section>;
 

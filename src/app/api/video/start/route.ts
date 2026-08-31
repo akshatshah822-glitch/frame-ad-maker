@@ -7,10 +7,11 @@ import { getVideoConfig } from "@/lib/video-config";
 import { RunwayVideoProvider, normalizeVideoError } from "@/lib/runway-provider";
 import { getVideoProduction } from "@/lib/video-production";
 import type { VideoClip } from "@/lib/types";
+import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 export const maxDuration = 60;
 
-export async function POST(request: Request) {
+const post = async (request: Request) => {
   const { generationId } = await request.json().catch(() => ({})) as { generationId?: string };
   if (!generationId) return NextResponse.json({ error: "A saved treatment is required." }, { status: 400 });
   if (!process.env.RUNWAYML_API_SECRET) return NextResponse.json({ error: "Video generation is not configured." }, { status: 503 });
@@ -43,4 +44,12 @@ export async function POST(request: Request) {
     await convex.mutation(anyApi.videoProductions.setStatus, { id: claim.id, status: "partial_failure", error: "The video provider could not start these shots." });
   }
   return NextResponse.json({ production: await getVideoProduction(generationId) });
-}
+};
+
+export const POST = withJsonErrors(post);
+export const GET = methodNotAllowed(["POST"]);
+export const HEAD = methodNotAllowed(["POST"]);
+export const PUT = methodNotAllowed(["POST"]);
+export const PATCH = methodNotAllowed(["POST"]);
+export const DELETE = methodNotAllowed(["POST"]);
+export const OPTIONS = methodNotAllowed(["POST"]);

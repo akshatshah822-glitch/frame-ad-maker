@@ -6,10 +6,11 @@ import { getVideoProduction, uploadMedia } from "@/lib/video-production";
 import { getVideoConfig } from "@/lib/video-config";
 import { RunwayVideoProvider, normalizeVideoError } from "@/lib/runway-provider";
 import { createLockedKeyframeClip } from "@/lib/keyframe-video";
+import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 export const maxDuration = 60;
 
-export async function POST(request: Request) {
+const post = async (request: Request) => {
   const { generationId, shotNumber } = await request.json().catch(() => ({})) as { generationId?: string; shotNumber?: number };
   if (!generationId || !Number.isInteger(shotNumber) || !shotNumber || shotNumber < 1 || shotNumber > 6) return NextResponse.json({ error: "Choose a failed shot to retry." }, { status: 400 });
   const [production, treatment] = await Promise.all([getVideoProduction(generationId), getTreatmentById(generationId)]);
@@ -35,4 +36,12 @@ export async function POST(request: Request) {
   const updated = await getVideoProduction(generationId);
   if (updated?.clips.every((item) => item.status === "complete")) await convex.mutation(anyApi.videoProductions.markClipsReady, { id: production.id, totalFinalCredits: updated.clips.reduce((sum, item) => sum + (item.finalCredits ?? 0), 0) });
   return NextResponse.json({ production: await getVideoProduction(generationId) });
-}
+};
+
+export const POST = withJsonErrors(post);
+export const GET = methodNotAllowed(["POST"]);
+export const HEAD = methodNotAllowed(["POST"]);
+export const PUT = methodNotAllowed(["POST"]);
+export const PATCH = methodNotAllowed(["POST"]);
+export const DELETE = methodNotAllowed(["POST"]);
+export const OPTIONS = methodNotAllowed(["POST"]);

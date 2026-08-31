@@ -3,10 +3,11 @@ import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
 import { RunwayVideoProvider, normalizeVideoError } from "@/lib/runway-provider";
 import { getVideoProduction, uploadMedia } from "@/lib/video-production";
+import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 export const maxDuration = 60;
 
-export async function POST(request: Request) {
+const post = async (request: Request) => {
   const { generationId } = await request.json().catch(() => ({})) as { generationId?: string };
   if (!generationId) return NextResponse.json({ error: "A production ID is required." }, { status: 400 });
   const production = await getVideoProduction(generationId);
@@ -35,4 +36,12 @@ export async function POST(request: Request) {
   if (updated?.clips.every((item) => item.status === "complete")) await convex.mutation(anyApi.videoProductions.markClipsReady, { id: production.id, totalFinalCredits: updated.clips.reduce((sum, item) => sum + (item.finalCredits ?? 0), 0) });
   else if (updated && !updated.clips.some((item) => ["waiting", "submitted", "running"].includes(item.status)) && updated.clips.some((item) => item.status === "failed")) await convex.mutation(anyApi.videoProductions.setStatus, { id: production.id, status: "partial_failure", error: "One or more shots could not be animated." });
   return NextResponse.json({ production: await getVideoProduction(generationId) });
-}
+};
+
+export const POST = withJsonErrors(post);
+export const GET = methodNotAllowed(["POST"]);
+export const HEAD = methodNotAllowed(["POST"]);
+export const PUT = methodNotAllowed(["POST"]);
+export const PATCH = methodNotAllowed(["POST"]);
+export const DELETE = methodNotAllowed(["POST"]);
+export const OPTIONS = methodNotAllowed(["POST"]);

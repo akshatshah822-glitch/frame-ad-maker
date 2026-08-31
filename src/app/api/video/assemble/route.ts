@@ -4,19 +4,20 @@ import { anyApi } from "convex/server";
 import { getTreatmentById } from "@/lib/treatment-data";
 import { assembleVideo } from "@/lib/video-assembly";
 import { getVideoProduction, uploadMedia } from "@/lib/video-production";
+import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 export const maxDuration = 300;
 export const runtime = "nodejs";
 
-export async function GET() {
+const get = async () => {
   return NextResponse.json({
     error: "Use POST to assemble a film.",
     acceptedMethod: "POST",
     requiredField: "generationId",
   }, { status: 405, headers: { Allow: "POST" } });
-}
+};
 
-export async function POST(request: Request) {
+const post = async (request: Request) => {
   const { generationId, force, narration } = await request.json().catch(() => ({})) as { generationId?: string; force?: boolean; narration?: string[] };
   if (!generationId) return NextResponse.json({ error: "A production ID is required." }, { status: 400 });
   const [production, treatment] = await Promise.all([getVideoProduction(generationId), getTreatmentById(generationId)]);
@@ -34,4 +35,11 @@ export async function POST(request: Request) {
     await convex.mutation(anyApi.videoProductions.setStatus, { id: production.id, status: "clips_ready", error: "Final assembly needs another attempt." });
     return NextResponse.json({ error: "The final edit could not be assembled. Your six clips are safe; try assembly again." }, { status: 502 });
   }
-}
+};
+
+export const GET = withJsonErrors(get);
+export const POST = withJsonErrors(post);
+export const PUT = methodNotAllowed(["POST"]);
+export const PATCH = methodNotAllowed(["POST"]);
+export const DELETE = methodNotAllowed(["POST"]);
+export const OPTIONS = methodNotAllowed(["POST"]);
