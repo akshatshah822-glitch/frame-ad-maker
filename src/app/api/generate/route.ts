@@ -98,8 +98,8 @@ const outputSchema = {
     },
     shots: {
       type: "array",
-      minItems: 4,
-      maxItems: 8,
+      minItems: 6,
+      maxItems: 6,
       items: {
         type: "object",
         additionalProperties: false,
@@ -136,7 +136,7 @@ function parseGeneration(outputText: string): ModelGeneration | null {
       && isNonEmptyStringArray(bible.colorPalette, 4) && isNonEmptyStringArray(bible.continuityLocks);
     const brandValid = brand && brandBibleStringFields.every((field) => typeof brand[field] === "string") && brandBibleArrayFields.every((field) => Array.isArray(brand[field]));
     const grammarValid = grammar && grammarFields.every((field) => typeof grammar[field] === "string" && Boolean((grammar[field] as string).trim()));
-    if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !brandValid || !grammarValid || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length < 4 || parsed.shots.length > 8) return null;
+    if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !brandValid || !grammarValid || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length !== 6) return null;
     const valid = parsed.shots.every((shot, index) => {
       if (!shot || typeof shot !== "object") return false;
       const stringsComplete = requiredShotContentFields.every((field) => typeof shot[field] === "string" && shot[field].trim().length > 0)
@@ -196,8 +196,8 @@ ${intent === "performance" ? `Creative mechanism: ${selectedConcept.creativeMech
 
 NARRATIVE ARCHITECTURE
 - Choose the structure that best serves this exact concept. Do not use a universal Hook/Tension/Product/Proof/Payoff/Brand template.
-- Choose between 4 and 8 shots. Use fewer shots when clarity and production economy improve; add shots only when the narrative needs them.
-${qaTargetShotCount ? `- PRODUCTION QA REQUIREMENT: Generate exactly ${qaTargetShotCount} shots while keeping the story coherent.` : ""}
+- Generate exactly 6 shots. Each shot must earn its place and the six together must form one coherent film.
+${qaTargetShotCount ? `- PRODUCTION QA REQUIREMENT: Keep exactly 6 shots while preserving the requested QA intent.` : ""}
 - The first shot starts at 0, the final shot ends at 30, timings are contiguous, and shot numbers are sequential.
 - narrativeBeat is a short human-readable name specific to that moment, not a forced template label.
 ${intent === "performance" ? "- The complete sequence must accomplish attention, message, proof, and action. The selected test objective must materially shape the order, proof and opening." : "- Build a clear setup, conflict, turn and payoff appropriate to the story. Preserve dignity and specificity; avoid melodrama and stereotypes."}
@@ -316,7 +316,13 @@ const post = async (request: Request) => {
   }
 
   let generation: Generation | null;
-  try { generation = await makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount, externalApiCall }); }
+  try {
+    generation = await makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount, externalApiCall });
+    if (!generation) {
+      console.warn("Storyboard response was incomplete; retrying once");
+      generation = await makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount, externalApiCall });
+    }
+  }
   catch (error) {
     console.error("OpenAI storyboard generation failed", error);
     const kind = classifyOpenAIError(error);
