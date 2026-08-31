@@ -15,6 +15,7 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   const [error, setError] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const assemblyRequested = useRef(false);
+  const startRequested = useRef(false);
   const filmShown = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -37,6 +38,19 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   }, [call, generationId]);
 
   useEffect(() => {
+    if (!generationId || !statusChecked || production || startRequested.current) return;
+    startRequested.current = true;
+    setWorking(true);
+    setError("");
+    call("/api/video/start", { generationId })
+      .catch((reason) => {
+        startRequested.current = false;
+        setError(reason instanceof Error ? reason.message : "Video production could not start.");
+      })
+      .finally(() => setWorking(false));
+  }, [call, generationId, production, statusChecked]);
+
+  useEffect(() => {
     if (!generationId || !production || !["creating", "generating"].includes(production.status)) return;
     const timer = window.setTimeout(() => call("/api/video/status", { generationId }).catch((reason) => setError(reason.message)), 8000);
     return () => window.clearTimeout(timer);
@@ -49,27 +63,16 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   }, [call, generationId, production?.status]);
 
   if (!generationId) return null;
-  const start = async () => {
-    if (!statusChecked || production) return;
-    setWorking(true); setError("");
-    try { await call("/api/video/start", { generationId }); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Video production could not start."); }
-    finally { setWorking(false); }
-  };
   const retry = async (shotNumber: number) => { setError(""); try { await call("/api/video/retry", { generationId, shotNumber }); } catch (reason) { setError(reason instanceof Error ? reason.message : "This shot could not be retried."); } };
   const cancel = async () => { setWorking(true); try { await call("/api/video/cancel", { generationId }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Production could not be cancelled."); } finally { setWorking(false); } };
 
-  if (!production) return <section className="video-gate" aria-labelledby="video-gate-title">
-    <p className="eyebrow">Next / Motion</p><h2 id="video-gate-title">Turn these frames into a finished ad.</h2>
-    <p>FRAME will animate six shots, direct the edit, add voice where the script calls for it, and deliver one 30-second MP4.</p>
-    <div className="video-start-action"><span>{statusChecked ? "No render yet" : "Checking render status…"}</span><button className="video-primary" type="button" onClick={start} disabled={working || !statusChecked}>{working ? "Starting production…" : "Generate my ad"}</button></div>
-    <small>Video generation starts only when you press this button.</small>
+  if (!production) return <section className="video-gate" aria-labelledby="video-gate-title" aria-live="polite">
+    <p className="eyebrow">Film production</p><h2 id="video-gate-title">Rendering 0 of 6</h2>
+    <p>{statusChecked ? "Starting the six shots automatically…" : "Checking for an existing render…"}</p>
     {error ? <p className="video-error" role="alert">{error}</p> : null}
   </section>;
 
   const complete = production.clips.filter((clip) => clip.status === "complete").length;
-  const failed = production.clips.filter((clip) => clip.status === "failed");
-  const active = production.clips.find((clip) => clip.status === "running" || clip.status === "submitted");
   const clipProgress = production.clips.reduce((total, clip) => {
     if (clip.status === "complete") return total + 1;
     if (clip.status === "running") {
@@ -91,7 +94,7 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
 
   return <section className="video-progress" aria-live="polite" aria-busy={["creating", "generating", "assembling"].includes(production.status)}>
     <p className="eyebrow">Film production</p>
-    <h2>{production.status === "assembling" ? "Editing your final film…" : production.status === "cancelled" ? "Production paused" : failed.length ? `${complete}/6 clips ready` : active ? `Directing the ${shotNames[active.shotNumber - 1]}…` : "Preparing the six shots…"}</h2>
+    <h2>{production.status === "assembling" ? "Stitching 6 of 6" : production.status === "cancelled" ? "Production paused" : `Rendering ${complete} of 6`}</h2>
     <p>{production.status === "assembling" ? "Normalizing the clips, laying in audio, and finishing the brand frame." : `${complete} of 6 clips are safely stored.`}</p>
     <div className="production-progress" role="progressbar" aria-label="Film production progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
       <div className="production-progress-meta"><span>Overall production</span><strong>{progress}%</strong></div>

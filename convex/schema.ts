@@ -34,6 +34,7 @@ export default defineSchema({
     selectedConcept: v.optional(v.string()), brandBible: v.optional(v.string()), creativeGrammar: v.optional(v.string()), visualBible: v.optional(v.string()), title: v.string(), script: v.optional(v.string()), shotList: v.string(),
     faceReferenceStorageId: v.optional(v.id("_storage")), faceReferenceUrl: v.optional(v.string()),
     productReferenceStorageId: v.optional(v.id("_storage")), productReferenceUrl: v.optional(v.string()),
+    finalVideoStorageId: v.optional(v.id("_storage")), finalVideoUrl: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_created_at", ["createdAt"]),
   videoProductions: defineTable({

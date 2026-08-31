@@ -23,7 +23,7 @@ type Props = {
   showVideoProduction?: boolean;
 };
 
-export function TreatmentView({ treatment, phase = "storyboard_ready", saved = true, currentShot, progressStep, progressElapsed = 0, onRetryShot, onRestart, initialVideoProduction = null, showVideoProduction = false }: Props) {
+export function TreatmentView({ treatment, phase = "storyboard_ready", saved = true, currentShot, progressStep, progressElapsed = 0, onRetryShot, onRestart, initialVideoProduction = null }: Props) {
   const [videoProduction, setVideoProduction] = useState(initialVideoProduction);
   const [loadedImages, setLoadedImages] = useState<Set<number>>(() => new Set());
   const [failedImageLoads, setFailedImageLoads] = useState<Set<number>>(() => new Set());
@@ -34,13 +34,13 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
   const loadedCount = generation.shots.filter((shot) => shot.imageUrl && loadedImages.has(shot.shotNumber)).length;
   const availableImageCount = generation.shots.filter((shot) => Boolean(shot.imageUrl)).length;
   const failedCount = generation.shots.filter((shot) => shot.imageStatus === "failed" || shot.imageStatus === "blocked" || failedImageLoads.has(shot.shotNumber)).length;
-  const ready = phase === "storyboard_ready" && completeCount === totalFrames && loadedCount === totalFrames;
+  const framesReady = phase === "storyboard_ready" && completeCount === totalFrames && loadedCount === totalFrames;
   const incomplete = phase === "storyboard_incomplete" || (phase === "storyboard_ready" && completeCount < totalFrames);
   const loadingImages = completeCount === totalFrames && loadedCount < totalFrames && failedImageLoads.size === 0;
-  const working = phase === "storyboard_generating" || phase === "images_generating" || loadingImages;
   const filmReady = videoProduction?.status === "ready" && Boolean(videoProduction.finalVideoUrl);
-  const statusTitle = filmReady ? "FILM READY" : ready ? "STORYBOARD READY" : incomplete || failedImageLoads.size ? `STORYBOARD INCOMPLETE · ${loadedCount}/${totalFrames} FRAMES` : phase === "images_generating" || loadingImages ? `GENERATING ${loadedCount} OF ${totalFrames}` : phase === "storyboard_generating" ? "DEVELOPING THE VISUAL WORLD" : "BUILDING THE STORYBOARD";
-  const statusCopy = filmReady ? "Your finished film is ready to watch and share." : ready ? "Your treatment and all frames are ready to share." : incomplete || failedImageLoads.size ? `${failedCount} ${failedCount === 1 ? "frame needs" : "frames need"} attention. Retry only the affected frame below.` : `${progressStep || (currentShot ? `Drawing frame ${currentShot} of ${totalFrames}` : "Loading the storyboard frames")} · ${progressElapsed}s elapsed`;
+  const renderedClips = videoProduction?.clips.filter((clip) => clip.status === "complete").length ?? 0;
+  const statusTitle = filmReady ? "FILM READY" : framesReady ? `RENDERING ${renderedClips} OF 6` : incomplete || failedImageLoads.size ? `STORYBOARD INCOMPLETE · ${loadedCount}/${totalFrames} FRAMES` : phase === "images_generating" || loadingImages ? `GENERATING ${loadedCount} OF ${totalFrames}` : phase === "storyboard_generating" ? "DEVELOPING THE VISUAL WORLD" : "BUILDING THE STORYBOARD";
+  const statusCopy = filmReady ? "Your finished film is ready to watch and share." : framesReady ? "Each finished shot is saved as it lands. The final player will appear here automatically." : incomplete || failedImageLoads.size ? `${failedCount} ${failedCount === 1 ? "frame needs" : "frames need"} attention. Retry only the affected frame below.` : `${progressStep || (currentShot ? `Drawing frame ${currentShot} of ${totalFrames}` : "Loading the storyboard frames")} · ${progressElapsed}s elapsed`;
   const playFilm = () => {
     const video = document.querySelector<HTMLVideoElement>(".final-ad video");
     video?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -66,11 +66,11 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
   return <main className="page result-page">
     <header className="topbar">{onRestart ? <button className="wordmark" type="button" onClick={onRestart}>FRAME<span>{"///"}</span></button> : <Link className="wordmark" href="/">FRAME<span>{"///"}</span></Link>}<span>30 sec ad maker</span>{onRestart ? <button className="new-button" type="button" onClick={onRestart}>Start over</button> : <Link className="new-button" href="/">Create your own</Link>}</header>
     <section className="treatment-header"><p className="eyebrow">Approved creative direction</p><div><span>Concept name</span><h1>{concept.conceptName || generation.title}</h1><p>{concept.idea || generation.title}</p>{brief.intent === "performance" && concept.whatThisTests && concept.whatThisTests !== "Not applicable" ? <div className="treatment-strategy"><small>WHAT THIS TESTS</small><strong>{concept.whatThisTests}</strong></div> : null}{brief.intent === "cinematic" ? <div className="treatment-strategy"><small>LOGLINE</small><strong>{concept.logline || concept.idea}</strong>{concept.humanTruth && concept.humanTruth !== "Not applicable" ? <p><b>Human truth:</b> {concept.humanTruth}</p> : null}{concept.emotionalArc && concept.emotionalArc !== "Not applicable" ? <p><b>Emotional arc:</b> {concept.emotionalArc}</p> : null}</div> : null}</div><aside><small>FORMAT</small><strong>{generation.duration}</strong><small>PLATFORM</small><strong>{brief.platform}</strong></aside></section>
-    <section className={`completion-state ${ready ? "is-ready" : "is-working"}`} aria-live="polite" aria-busy={working}>
-      <span className="completion-mark" aria-hidden="true">{ready ? "✓" : ""}</span><div><small>{statusTitle}</small><strong>{statusCopy}</strong></div>
-      {ready ? <div className="completion-actions-wrap">{filmReady ? <button className="primary-button" type="button" onClick={playFilm}>Watch film <span aria-hidden="true">↓</span></button> : null}<CompletionActions treatment={treatment} onRestart={onRestart} filmReady={filmReady} canDownloadVideo={totalFrames === 6 && availableImageCount === 6} /></div> : null}
+    <section className={`completion-state ${filmReady ? "is-ready" : "is-working"}`} aria-live="polite" aria-busy={!filmReady}>
+      <span className="completion-mark" aria-hidden="true">{filmReady ? "✓" : ""}</span><div><small>{statusTitle}</small><strong>{statusCopy}</strong></div>
+      {filmReady ? <div className="completion-actions-wrap"><button className="primary-button" type="button" onClick={playFilm}>Watch film <span aria-hidden="true">↓</span></button><CompletionActions treatment={treatment} onRestart={onRestart} filmReady={filmReady} canDownloadVideo={totalFrames === 6 && availableImageCount === 6} /></div> : null}
     </section>
-    {ready && totalFrames === 6 && completeCount === 6 && (showVideoProduction || videoProduction) ? <VideoProduction generationId={treatment.id} posterUrl={generation.shots[0]?.imageUrl} treatmentTitle={generation.title} initialProduction={videoProduction} onProductionChange={setVideoProduction} /> : null}
+    {framesReady && totalFrames === 6 && completeCount === 6 ? <VideoProduction generationId={treatment.id} posterUrl={generation.shots[0]?.imageUrl} treatmentTitle={generation.title} initialProduction={videoProduction} onProductionChange={setVideoProduction} /> : null}
     <div className="treatment-rule"><span>Storyboard / {totalFrames} frames</span><span>01—{String(totalFrames).padStart(2, "0")}</span></div>
     <section className="storyboard-sequence" aria-label={`${totalFrames}-frame storyboard`}>{generation.shots.map((shot, index) => {
       const display = getShotDisplay(shot);
@@ -96,6 +96,6 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
         </div></details>
       </article>;
     })}</section>
-    {ready ? <footer className="result-footer"><p>{saved ? "Treatment and frames saved." : "Treatment created. Saving was unavailable for this run."}</p></footer> : null}
+    {filmReady ? <footer className="result-footer"><p>{saved ? "Treatment, frames, and film saved." : "Film created. Saving was unavailable for this run."}</p></footer> : null}
   </main>;
 }

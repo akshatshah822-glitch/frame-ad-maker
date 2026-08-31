@@ -25,22 +25,25 @@ const post = async (request: Request) => {
   let claim: { id: string; created: boolean };
   try { claim = await convex.mutation(anyApi.videoProductions.begin, { generationId, clips: JSON.stringify(clips) }); }
   catch (error) { return NextResponse.json({ error: error instanceof Error && error.message.includes("ACTIVE_PRODUCTION_LIMIT") ? "The studio is at capacity. Try again shortly." : "Video production could not start." }, { status: 429 }); }
-  if (!claim.created) return NextResponse.json({ production: await getVideoProduction(generationId), duplicate: true });
+  const existing = claim.created ? null : await getVideoProduction(generationId);
+  const productionClips = existing?.clips ?? clips;
+  const clipsToSubmit = productionClips.filter((clip) => clip.status === "waiting");
+  if (!clipsToSubmit.length) return NextResponse.json({ production: existing, duplicate: true });
 
   const provider = new RunwayVideoProvider();
   const ratio = getVideoConfig(treatment.brief.platform).runwayRatio;
-  for (const clip of clips) {
+  await Promise.all(clipsToSubmit.map(async (clip) => {
     const shot = treatment.generation.shots[clip.shotNumber - 1];
     try {
-      const job = await provider.createVideoJob({ referenceImageUrl: shot.imageUrl!, motionPrompt: clip.motionPrompt, duration: clip.duration, ratio });
+      const job = await provider.createVideoJob({ referenceImageUrl: shot.imageUrl!, motionPrompt: clip.motionPrompt, duration: clip.duration, ratio, context: { shotNumber: clip.shotNumber, requestId: clip.jobKey } });
       Object.assign(clip, { status: "submitted", providerTaskId: job.id, estimatedCredits: job.estimatedCredits, submittedAt: Date.now() });
     } catch (error) {
       const normalized = normalizeVideoError(error);
       Object.assign(clip, { status: "failed", error: normalized.message, failureCode: normalized.kind });
     }
     await convex.mutation(anyApi.videoProductions.updateClip, { id: claim.id, shotNumber: clip.shotNumber, clip: JSON.stringify(clip), productionStatus: "generating" });
-  }
-  if (clips.every((clip) => clip.status === "failed")) {
+  }));
+  if (productionClips.every((clip) => clip.status === "failed")) {
     await convex.mutation(anyApi.videoProductions.setStatus, { id: claim.id, status: "partial_failure", error: "The video provider could not start these shots." });
   }
   return NextResponse.json({ production: await getVideoProduction(generationId) });

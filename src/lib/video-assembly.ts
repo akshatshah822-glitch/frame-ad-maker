@@ -7,7 +7,7 @@ import type { TreatmentData, VideoProduction } from "@/lib/types";
 import { generateVoiceSegments } from "@/lib/voice";
 import { getVideoConfig } from "@/lib/video-config";
 import { probeFinalVideo } from "@/lib/video-qa";
-import { createEndCard, createScreenCopyOverlay } from "@/lib/render-graphics";
+import { createScreenCopyOverlay } from "@/lib/render-graphics";
 
 const exec = promisify(execFile);
 
@@ -20,7 +20,8 @@ export async function assembleVideo(treatment: TreatmentData, production: VideoP
   const directory = await mkdtemp(join(tmpdir(), "frame-video-"));
   const config = getVideoConfig(treatment.brief.platform);
   const normalized: string[] = [];
-  for (const clip of production.clips) {
+  const orderedClips = [...production.clips].sort((a, b) => a.shotNumber - b.shotNumber);
+  for (const clip of orderedClips) {
     if (!clip.videoUrl) throw new Error(`Shot ${clip.shotNumber} has no durable video`);
     const source = join(directory, `source-${clip.shotNumber}.mp4`);
     const output = join(directory, `shot-${clip.shotNumber}.mp4`);
@@ -52,19 +53,15 @@ export async function assembleVideo(treatment: TreatmentData, production: VideoP
   const picture = join(directory, "picture.mp4");
   await runFfmpeg(["-f", "concat", "-safe", "0", "-i", concatFile, "-c", "copy", picture]);
 
-  const endCard = join(directory, "end-card.png");
-  await writeFile(endCard, await createEndCard(config.width, config.height));
-
   const voiceSegments = await generateVoiceSegments(treatment.generation.shots, treatment.brief, narration);
   const voicePaths: Array<{ path: string; delay: number }> = [];
   for (const segment of voiceSegments) { const path = join(directory, `voice-${segment.shotNumber}.mp3`); await writeFile(path, segment.bytes); voicePaths.push({ path, delay: segment.startTime * 1000 }); }
   const finalPath = join(directory, "frame-final.mp4");
-  const inputs = ["-i", picture, "-f", "lavfi", "-t", "30", "-i", "anullsrc=r=48000:cl=stereo", ...voicePaths.flatMap((voice) => ["-i", voice.path]), "-loop", "1", "-t", "2.5", "-i", endCard];
+  const inputs = ["-i", picture, "-f", "lavfi", "-t", "30", "-i", "anullsrc=r=48000:cl=stereo", ...voicePaths.flatMap((voice) => ["-i", voice.path])];
   const audioParts = voicePaths.map((voice, index) => `[${index + 2}:a]adelay=${voice.delay}|${voice.delay},aresample=48000,volume=1[vo${index}]`);
   const audioInputs = ["[1:a]", ...voicePaths.map((_, index) => `[vo${index}]`)].join("");
   const audioFilter = `${audioParts.length ? `${audioParts.join(";")};` : ""}${audioInputs}amix=inputs=${voicePaths.length + 1}:duration=longest:normalize=0,alimiter=limit=0.95[a]`;
-  const endCardIndex = voicePaths.length + 2;
-  const videoFilter = `[0:v]trim=duration=27.5,setpts=PTS-STARTPTS,format=yuv420p[film];[${endCardIndex}:v]trim=duration=2.5,setpts=PTS-STARTPTS,format=yuv420p[end];[film][end]concat=n=2:v=1:a=0[v]`;
+  const videoFilter = "[0:v]trim=duration=30,setpts=PTS-STARTPTS,format=yuv420p[v]";
   await runFfmpeg([...inputs, "-filter_complex", `${audioFilter};${videoFilter}`, "-map", "[v]", "-map", "[a]", "-t", "30", "-r", "24", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", finalPath]);
   const qa = await probeFinalVideo(finalPath, { width: config.width, height: config.height, duration: 30 });
   if (!qa.passed) throw new Error(`Final technical QA failed: ${JSON.stringify(qa)}`);

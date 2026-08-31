@@ -28,6 +28,8 @@ const post = async (request: Request) => {
   try {
     const result = await assembleVideo(treatment, production, narration);
     const asset = await uploadMedia(result.bytes, "video/mp4");
+    const attached = await convex.mutation(anyApi.generations.attachFinalVideo, { generationId, finalVideoStorageId: asset.storageId, finalVideoUrl: asset.mediaUrl });
+    if (!attached) throw new Error("The finished video could not be attached to its generation.");
     await convex.mutation(anyApi.videoProductions.finish, { id: production.id, finalVideoStorageId: asset.storageId, finalVideoUrl: asset.mediaUrl, technicalQa: JSON.stringify(result.qa) });
     return NextResponse.json({ production: await getVideoProduction(generationId) });
   } catch (error) {

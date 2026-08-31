@@ -12,7 +12,7 @@ const post = async (request: Request) => {
   if (!production) return NextResponse.json({ error: "This production is unavailable." }, { status: 404 });
   const provider = new RunwayVideoProvider();
   for (const clip of production.clips) {
-    if (clip.providerTaskId && ["submitted", "running"].includes(clip.status)) await provider.cancelVideoJob(clip.providerTaskId).catch(() => undefined);
+    if (clip.providerTaskId && ["submitted", "running"].includes(clip.status)) await provider.cancelVideoJob(clip.providerTaskId, { shotNumber: clip.shotNumber, requestId: clip.providerTaskId }).catch(() => undefined);
     if (["waiting", "submitted", "running"].includes(clip.status)) {
       clip.status = "cancelled";
       await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!).mutation(anyApi.videoProductions.updateClip, { id: production.id, shotNumber: clip.shotNumber, clip: JSON.stringify(clip) });

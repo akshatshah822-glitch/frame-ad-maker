@@ -36,6 +36,19 @@ export const attachIdentityReferences = mutation({
   },
 });
 
+export const attachFinalVideo = mutation({
+  args: {
+    generationId: v.id("generations"),
+    finalVideoStorageId: v.id("_storage"),
+    finalVideoUrl: v.string(),
+  },
+  handler: async (ctx, { generationId, finalVideoStorageId, finalVideoUrl }) => {
+    if (!await ctx.db.get(generationId)) return false;
+    await ctx.db.patch(generationId, { finalVideoStorageId, finalVideoUrl });
+    return true;
+  },
+});
+
 export const attachImage = mutation({
   args: {
     generationId: v.id("generations"),

@@ -24,6 +24,7 @@ STYLE: ${compact(creativeGrammar.cameraPhilosophy, 80)}
 
 ANIMATE ONLY
 Subject: ${compact(motion.subjectMotion, 120)}
+Narration/action cue: ${compact(shot.voiceoverOrDialogue || shot.subjectAction, 140)}
 Product: ${compact(motion.productMotion, 90)}
 Camera: ${compact(motion.cameraMotion, 80)}
 Focus/environment: ${compact(`${motion.focusMotion}; ${motion.environmentMotion}`, 100)}

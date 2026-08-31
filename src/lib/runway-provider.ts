@@ -1,5 +1,5 @@
 import RunwayML, { AuthenticationError, BadRequestError, RateLimitError } from "@runwayml/sdk";
-import type { ProviderJob, NormalizedVideoError, VideoProvider } from "@/lib/video-provider";
+import type { ProviderJob, NormalizedVideoError, VideoProvider, VideoProviderCallContext } from "@/lib/video-provider";
 
 function client() {
   const apiKey = process.env.RUNWAYML_API_SECRET;
@@ -24,18 +24,56 @@ function mapTask(task: Awaited<ReturnType<ReturnType<typeof client>["tasks"]["re
   return { id: task.id, state: "pending", estimatedCredits: task.estimatedCost.credits };
 }
 
+function logRunway(operation: string, context: VideoProviderCallContext, status: string) {
+  console.log(`RUNWAY ${operation} shot=${context.shotNumber} requestId=${context.requestId} status=${status}`);
+}
+
 export class RunwayVideoProvider implements VideoProvider {
-  async createVideoJob({ referenceImageUrl, motionPrompt, duration, ratio }: Parameters<VideoProvider["createVideoJob"]>[0]) {
-    const task = await client().imageToVideo.create({ model: "gen4.5", promptImage: await imageDataUri(referenceImageUrl), promptText: motionPrompt.slice(0, 1000), ratio, duration, outputFormat: "mp4" });
-    return { id: task.id, state: "pending" as const, estimatedCredits: task.estimatedCost.credits };
+  async createVideoJob({ referenceImageUrl, motionPrompt, duration, ratio, context }: Parameters<VideoProvider["createVideoJob"]>[0]) {
+    logRunway("create", context, "starting");
+    try {
+      const task = await client().imageToVideo.create({ model: "gen4.5", promptImage: await imageDataUri(referenceImageUrl), promptText: motionPrompt.slice(0, 1000), ratio, duration, outputFormat: "mp4" });
+      logRunway("create", { ...context, requestId: task.id }, "submitted");
+      return { id: task.id, state: "pending" as const, estimatedCredits: task.estimatedCost.credits };
+    } catch (error) {
+      logRunway("create", context, `error:${normalizeVideoError(error).kind}`);
+      throw error;
+    }
   }
-  async getVideoJobStatus(id: string) { return mapTask(await client().tasks.retrieve(id)); }
-  async downloadVideoResult(url: string) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Runway output download failed with ${response.status}`);
-    return new Uint8Array(await response.arrayBuffer());
+  async getVideoJobStatus(id: string, context: VideoProviderCallContext) {
+    logRunway("status", context, "starting");
+    try {
+      const job = mapTask(await client().tasks.retrieve(id));
+      logRunway("status", context, job.state);
+      return job;
+    } catch (error) {
+      logRunway("status", context, `error:${normalizeVideoError(error).kind}`);
+      throw error;
+    }
   }
-  async cancelVideoJob(id: string) { await client().tasks.delete(id); }
+  async downloadVideoResult(url: string, context: VideoProviderCallContext) {
+    logRunway("download", context, "starting");
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Runway output download failed with ${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      logRunway("download", context, `complete:${bytes.byteLength}-bytes`);
+      return bytes;
+    } catch (error) {
+      logRunway("download", context, `error:${normalizeVideoError(error).kind}`);
+      throw error;
+    }
+  }
+  async cancelVideoJob(id: string, context: VideoProviderCallContext) {
+    logRunway("cancel", context, "starting");
+    try {
+      await client().tasks.delete(id);
+      logRunway("cancel", context, "cancelled");
+    } catch (error) {
+      logRunway("cancel", context, `error:${normalizeVideoError(error).kind}`);
+      throw error;
+    }
+  }
 }
 
 export function normalizeVideoError(error: unknown): NormalizedVideoError {

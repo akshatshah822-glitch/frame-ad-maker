@@ -5,7 +5,8 @@ import { hasDialogue } from "@/lib/treatment";
 export type VoiceSegment = { shotNumber: number; startTime: number; endTime: number; bytes: Uint8Array };
 
 function cleanDialogue(value: string) {
-  return value.replace(/^(VO|VOICEOVER|DIALOGUE)(\s*\([^)]*\))?\s*:\s*/i, "").replace(/^['“]|['”]$/g, "").trim();
+  const voiceLine = value.match(/(?:^|;\s*)(?:VO|VOICEOVER|DIALOGUE)(?:\s*\([^)]*\))?\s*:\s*(.+)$/i)?.[1] ?? value;
+  return voiceLine.replace(/^['“]|['”]$/g, "").trim();
 }
 
 export async function generateVoiceSegments(shots: Shot[], brief: Brief, narration?: string[]) {
@@ -17,12 +18,15 @@ export async function generateVoiceSegments(shots: Shot[], brief: Brief, narrati
     const suppliedNarration = narration?.[shot.shotNumber - 1]?.trim();
     const dialogue = suppliedNarration || (hasDialogue(shot.voiceoverOrDialogue) ? cleanDialogue(shot.voiceoverOrDialogue) : "");
     if (!dialogue) continue;
-    try {
-      const speech = await client.audio.speech.create({ model: "tts-1-hd", voice, input: dialogue, response_format: "mp3", speed: 1 });
-      segments.push({ shotNumber: shot.shotNumber, startTime: shot.startTime, endTime: shot.endTime, bytes: new Uint8Array(await speech.arrayBuffer()) });
-    } catch (error) {
-      console.warn(`Voice generation skipped for shot ${shot.shotNumber}`, error);
-    }
+    const speech = await client.audio.speech.create({
+      model: "gpt-4o-mini-tts",
+      voice,
+      input: dialogue,
+      instructions: "Speak in clear, natural Indian English with a calm cinematic advertising delivery. Pronounce Indian brand and exam terms carefully and exactly as written. Do not add, remove, or paraphrase any words.",
+      response_format: "mp3",
+      speed: 1,
+    });
+    segments.push({ shotNumber: shot.shotNumber, startTime: shot.startTime, endTime: shot.endTime, bytes: new Uint8Array(await speech.arrayBuffer()) });
   }
   return segments;
 }
