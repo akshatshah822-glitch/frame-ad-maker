@@ -18,6 +18,7 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   const startRequested = useRef(false);
   const filmShown = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const productionStatus = production?.status;
 
   useEffect(() => { onProductionChange?.(production); }, [onProductionChange, production]);
 
@@ -51,10 +52,22 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   }, [call, generationId, production, statusChecked]);
 
   useEffect(() => {
-    if (!generationId || !production || !["creating", "generating"].includes(production.status)) return;
-    const timer = window.setTimeout(() => call("/api/video/status", { generationId }).catch((reason) => setError(reason.message)), 8000);
-    return () => window.clearTimeout(timer);
-  }, [call, generationId, production]);
+    if (!generationId || !productionStatus || !["creating", "generating"].includes(productionStatus)) return;
+    let cancelled = false;
+    let timer = 0;
+    const poll = async () => {
+      try {
+        await call("/api/video/status", { generationId });
+        if (!cancelled) setError("");
+      } catch (reason) {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "Render status could not be checked.");
+      } finally {
+        if (!cancelled) timer = window.setTimeout(poll, 8000);
+      }
+    };
+    timer = window.setTimeout(poll, 8000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [call, generationId, productionStatus]);
 
   useEffect(() => {
     if (!generationId || production?.status !== "clips_ready" || assemblyRequested.current) return;
