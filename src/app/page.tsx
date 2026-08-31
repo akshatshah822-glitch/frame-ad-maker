@@ -290,6 +290,7 @@ export default function Home() {
         const response = await fetch("/api/images", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(125_000),
           body: JSON.stringify({
             imagePrompt: shot.imagePrompt,
             platform: form.platform,

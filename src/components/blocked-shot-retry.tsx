@@ -22,6 +22,7 @@ export function BlockedShotRetry({ shot, generationId, platform, totalShots }: P
           const response = await fetch("/api/images", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: AbortSignal.timeout(125_000),
             body: JSON.stringify({
               imagePrompt: prompt,
               platform,
