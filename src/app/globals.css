@@ -315,6 +315,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .video-download-error { align-self:center; max-width:180px; color:#a72d21; font-size:9px; line-height:1.35; }
 .animatic-actions { display:grid; gap:8px; width:min(100%,330px); }
 .animatic-actions>.export-button { width:100%; }
+.animatic-helper { margin:0; color:var(--muted); font-size:10px; line-height:1.4; }
 .real-video-request { display:grid; gap:8px; }
 .real-video-cta { min-height:44px; border:1px solid var(--ink); background:var(--coral); color:var(--ink); padding:10px 12px; font-size:9px; font-weight:900; line-height:1.35; text-transform:uppercase; cursor:pointer; }
 .real-video-request form { display:grid; gap:10px; padding:14px; border:1px solid var(--ink); background:var(--panel); box-shadow:4px 4px 0 var(--blue); }
