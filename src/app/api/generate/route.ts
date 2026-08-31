@@ -5,7 +5,7 @@ import OpenAI from "openai";
 import { buildImagePrompt } from "@/lib/image-prompt";
 import type { BrandBible, Concept, CreativeGrammar, Generation, Shot, VisualBible } from "@/lib/types";
 import { classifyOpenAIError } from "@/lib/openai-error";
-import { findUnsupportedProof, proofSafetyInstruction } from "@/lib/proof-safety";
+import { findUnsupportedProof, neutralizeUnsupportedProof, proofSafetyInstruction } from "@/lib/proof-safety";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 type StoryboardBrief = { intent?: string; testObjective?: string; testObjectiveOther?: string; preserveDetails?: string; brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown; qaTargetShotCount?: number; runId?: string | number };
@@ -135,24 +135,26 @@ function parseGeneration(outputText: string): ModelGeneration | null {
     const bibleValid = bible && visualBibleStringFields.every((field) => typeof bible[field] === "string" && (bible[field] as string).trim().length > 0)
       && isNonEmptyStringArray(bible.colorPalette, 4) && isNonEmptyStringArray(bible.continuityLocks);
     const brandValid = brand && brandBibleStringFields.every((field) => typeof brand[field] === "string") && brandBibleArrayFields.every((field) => Array.isArray(brand[field]));
-    const grammarValid = grammar && grammarFields.every((field) => typeof grammar[field] === "string" && Boolean((grammar[field] as string).trim()));
-    if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.duration !== "string" || !brandValid || !grammarValid || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length !== 6) return null;
-    const valid = parsed.shots.every((shot, index) => {
+    const grammarValid = grammar && grammarFields.every((field) => typeof grammar[field] === "string");
+    if (typeof parsed.title !== "string" || typeof parsed.duration !== "string" || !brandValid || !grammarValid || !bibleValid || !Array.isArray(parsed.shots) || parsed.shots.length !== 6) return null;
+    const structurallyValid = parsed.shots.every((shot) => {
       if (!shot || typeof shot !== "object") return false;
-      const stringsComplete = requiredShotContentFields.every((field) => typeof shot[field] === "string" && shot[field].trim().length > 0)
+      const stringsComplete = requiredShotContentFields.every((field) => typeof shot[field] === "string")
         && typeof shot.voiceoverOrDialogue === "string";
       const motion = shot.motionDirection as unknown as Record<string, unknown> | undefined;
-      const motionValid = motion && motionFields.every((field) => typeof motion[field] === "string" && Boolean((motion[field] as string).trim())) && ["restrained", "moderate", "energetic"].includes(String(motion.motionIntensity));
-      return stringsComplete && motionValid && shot.shotNumber === index + 1 && Number.isInteger(shot.sceneNumber) && Number.isInteger(shot.startTime) && Number.isInteger(shot.endTime) && shot.endTime > shot.startTime && (index === 0 ? shot.startTime === 0 : shot.startTime === parsed.shots![index - 1].endTime);
+      const motionValid = motion && motionFields.every((field) => typeof motion[field] === "string") && ["restrained", "moderate", "energetic"].includes(String(motion.motionIntensity));
+      return stringsComplete && motionValid && Number.isInteger(shot.sceneNumber);
     });
-    if (!valid || parsed.shots.at(-1)?.endTime !== 30) return null;
+    if (!structurallyValid) return null;
+    const boundaries = [0, 4, 10, 14, 20, 26, 30];
+    const shots = parsed.shots.map((shot, index) => ({ ...shot, shotNumber: index + 1, startTime: boundaries[index], endTime: boundaries[index + 1] }));
     return {
-      title: parsed.title,
-      duration: parsed.duration,
+      title: parsed.title.trim() || "Directed 30-second treatment",
+      duration: parsed.duration.trim() || "30 seconds",
       brandBible: parsed.brandBible,
       creativeGrammar: parsed.creativeGrammar,
       visualBible: parsed.visualBible,
-      shots: parsed.shots,
+      shots,
     } as ModelGeneration;
   } catch {
     return null;
@@ -263,7 +265,8 @@ Return only the structured storyboard.`,
       text: { format: { type: "json_schema", name: "repaired_concept_led_storyboard", strict: true, schema: outputSchema } },
     }));
     modelGeneration = parseGeneration(repaired.output_text);
-    if (!modelGeneration || findUnsupportedProof(modelGeneration, suppliedSource).length) return null;
+    if (!modelGeneration) return null;
+    if (findUnsupportedProof(modelGeneration, suppliedSource).length) modelGeneration = neutralizeUnsupportedProof(modelGeneration, suppliedSource);
   }
   const sharedPromptContext = {
     intent,
