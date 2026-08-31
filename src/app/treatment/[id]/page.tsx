@@ -20,5 +20,5 @@ export default async function TreatmentPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const [treatment, production] = await Promise.all([getTreatmentById(id), getVideoProduction(id)]);
   if (!treatment) notFound();
-  return <TreatmentView treatment={treatment} initialVideoProduction={production} />;
+  return <TreatmentView treatment={treatment} initialVideoProduction={production} showVideoProduction />;
 }

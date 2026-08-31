@@ -19,9 +19,10 @@ type Props = {
   onRetryShot?: (shot: Shot) => void;
   onRestart?: () => void;
   initialVideoProduction?: Production | null;
+  showVideoProduction?: boolean;
 };
 
-export function TreatmentView({ treatment, phase = "storyboard_ready", saved = true, currentShot, progressStep, progressElapsed = 0, onRetryShot, onRestart, initialVideoProduction = null }: Props) {
+export function TreatmentView({ treatment, phase = "storyboard_ready", saved = true, currentShot, progressStep, progressElapsed = 0, onRetryShot, onRestart, initialVideoProduction = null, showVideoProduction = false }: Props) {
   const [videoProduction, setVideoProduction] = useState(initialVideoProduction);
   const { brief, concept, generation } = treatment;
   const totalFrames = generation.shots.length;
@@ -46,7 +47,7 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
       <span className="completion-mark" aria-hidden="true">{ready ? "✓" : ""}</span><div><small>{statusTitle}</small><strong>{statusCopy}</strong></div>
       {ready ? <div className="completion-actions-wrap">{filmReady ? <button className="primary-button" type="button" onClick={playFilm}>Watch film <span aria-hidden="true">↓</span></button> : null}<CompletionActions treatment={treatment} onRestart={onRestart} filmReady={filmReady} canDownloadVideo={totalFrames === 6 && availableImageCount === 6} /></div> : null}
     </section>
-    {ready && totalFrames === 6 && completeCount === 6 && videoProduction ? <VideoProduction generationId={treatment.id} posterUrl={generation.shots[0]?.imageUrl} treatmentTitle={generation.title} initialProduction={videoProduction} onProductionChange={setVideoProduction} /> : null}
+    {ready && totalFrames === 6 && completeCount === 6 && (showVideoProduction || videoProduction) ? <VideoProduction generationId={treatment.id} posterUrl={generation.shots[0]?.imageUrl} treatmentTitle={generation.title} initialProduction={videoProduction} onProductionChange={setVideoProduction} /> : null}
     <div className="treatment-rule"><span>Storyboard / {totalFrames} frames</span><span>01—{String(totalFrames).padStart(2, "0")}</span></div>
     <section className="storyboard-sequence" aria-label={`${totalFrames}-frame storyboard`}>{generation.shots.map((shot, index) => {
       const display = getShotDisplay(shot);
