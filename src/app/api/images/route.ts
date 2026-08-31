@@ -4,7 +4,7 @@ import { anyApi } from "convex/server";
 import OpenAI, { toFile } from "openai";
 import sharp from "sharp";
 import { getImageSize, supportedPlatforms } from "@/lib/image-prompt";
-import { classifyOpenAIError } from "@/lib/openai-error";
+import { classifyOpenAIError, getOpenAIRequestId } from "@/lib/openai-error";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 export const maxDuration = 120;
@@ -18,7 +18,17 @@ type ImageRequest = {
   productReferenceUrl?: string;
   runId?: string | number;
   totalShots?: number;
+  attempt?: number;
+  productPresence?: string;
+  locationAndProps?: string;
+  lighting?: string;
+  cameraFraming?: string;
+  cameraAngle?: string;
+  lensSuggestion?: string;
+  cameraMovement?: string;
 };
+
+const BLOCKED_REASON = "OpenAI blocked this frame after one safer retry. Reword the image direction and try this shot again.";
 
 async function updateRunStage(body: ImageRequest, status: string, step: string, currentCount?: number) {
   if (!body.runId || !process.env.NEXT_PUBLIC_CONVEX_URL) return;
@@ -39,6 +49,14 @@ function imageErrorResponse(error: unknown) {
     return NextResponse.json({ error: "Image generation is not configured for this project." }, { status: 503 });
   }
   return NextResponse.json({ error: "This frame couldn't be rendered." }, { status: 502 });
+}
+
+function readableImageError(error: unknown) {
+  const kind = classifyOpenAIError(error);
+  if (kind === "quota") return "Image generation is not available for this project right now.";
+  if (kind === "rate_limit") return "Image generation stayed busy after three retries. Retry this frame shortly.";
+  if (kind === "configuration") return "Image generation is not configured for this project.";
+  return "This frame couldn't be rendered after three retries.";
 }
 
 async function storeImage(imageBytes: Uint8Array, generationId: string | undefined, shotNumber: number) {
@@ -125,6 +143,36 @@ async function resolveReferences(body: ImageRequest) {
   return { faceReferenceUrl: String(record.faceReferenceUrl), productReferenceUrl: String(record.productReferenceUrl) };
 }
 
+function neutralizeImagePrompt(body: ImageRequest) {
+  const clean = (value: unknown, fallback: string) => String(value ?? "").replace(/\s+/g, " ").trim() || fallback;
+  return `Create a neutral commercial product photograph with no description of any person's body, face, age, clothing, ethnicity or physical appearance.
+
+PRODUCT: ${clean(body.productPresence, "Keep the advertised product clearly visible and unchanged.")}
+SETTING: ${clean(body.locationAndProps, "A simple professional interior with minimal neutral props.")}
+LIGHTING: ${clean(body.lighting, "Soft, natural commercial lighting.")}
+CAMERA: ${clean(body.cameraFraming, "Medium product-focused framing")}; ${clean(body.cameraAngle, "eye-level angle")}; ${clean(body.lensSuggestion, "natural perspective")}; ${clean(body.cameraMovement, "static camera")}.
+
+Keep the scene non-sensitive, professional and product-focused. No text, logos, claims or extra products.`;
+}
+
+async function markShotBlocked(body: ImageRequest, shotNumber: number) {
+  if (!body.generationId || !process.env.NEXT_PUBLIC_CONVEX_URL) return;
+  try {
+    await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL).mutation(anyApi.generations.markImageBlocked, { generationId: body.generationId, shotNumber, reason: BLOCKED_REASON });
+  } catch (error) {
+    console.warn(`Shot ${shotNumber} block state could not be saved`, error);
+  }
+}
+
+async function markShotFailed(body: ImageRequest, shotNumber: number, reason: string) {
+  if (!body.generationId || !process.env.NEXT_PUBLIC_CONVEX_URL) return;
+  try {
+    await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL).mutation(anyApi.generations.markImageFailed, { generationId: body.generationId, shotNumber, reason });
+  } catch (error) {
+    console.warn(`Shot ${shotNumber} failure state could not be saved`, error);
+  }
+}
+
 const post = async (request: Request) => {
   let body: ImageRequest;
   try {
@@ -136,6 +184,7 @@ const post = async (request: Request) => {
   const imagePrompt = String(body.imagePrompt ?? "").trim();
   const platform = String(body.platform ?? "").trim();
   body.runId = String(body.runId ?? "").trim() || undefined;
+  body.attempt = Number.isInteger(body.attempt) ? Number(body.attempt) : 1;
   const shotNumber = body.shotNumber;
   if (!imagePrompt || imagePrompt.length > 32_000 || !platform || !supportedPlatforms.includes(platform) || !Number.isInteger(shotNumber) || !shotNumber || shotNumber < 1 || shotNumber > 10) {
     return NextResponse.json({ error: "This frame is missing valid production direction." }, { status: 400 });
@@ -151,24 +200,42 @@ const post = async (request: Request) => {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const references = await resolveReferences(body);
     const sharedOptions = { model: "gpt-image-2" as const, n: 1, size: getImageSize(platform), quality: "medium" as const, output_format: "jpeg" as const, output_compression: 82, background: "opaque" as const };
-    const result = references
-      ? await openai.images.edit({
+    const generateFrame = async (prompt: string) => references
+      ? openai.images.edit({
           ...sharedOptions,
           image: [
             await toFile(Buffer.from(await (await fetch(references.faceReferenceUrl)).arrayBuffer()), "face-reference.jpg", { type: "image/jpeg" }),
             await toFile(Buffer.from(await (await fetch(references.productReferenceUrl)).arrayBuffer()), "product-reference.jpg", { type: "image/jpeg" }),
           ],
-          prompt: `OUTPUT FORMAT LOCK: Generate one single photograph that fills the entire canvas. Show one moment in time only. Never divide the canvas or repeat the subject. No collage, montage, diptych, triptych, grid, contact sheet, split screen, multi-panel composition, sequence, before-and-after, inset image, or storyboard sheet.\n\nREFERENCE 1 is the canonical face and adult character identity. REFERENCE 2 is the canonical finished product identity. Preserve both exactly; change only staging, action, framing and scene direction required below. The exact finished product from REFERENCE 2 must remain clearly visible in this frame; story elements may coexist with it but must never replace, redesign, recolor or morph it. Any visible recurring woman must be the exact adult from REFERENCE 1. This is a non-sexual, fully clothed, professional jewellery commercial. Use neutral art direction and avoid sensual framing.\n\n${imagePrompt}`,
+          prompt: `OUTPUT FORMAT LOCK: Generate one single photograph that fills the entire canvas. Show one moment in time only. Never divide the canvas or repeat the subject. No collage, montage, diptych, triptych, grid, contact sheet, split screen, multi-panel composition, sequence, before-and-after, inset image, or storyboard sheet.\n\nREFERENCE 1 is the canonical adult character identity. REFERENCE 2 is the canonical finished product identity. Preserve both exactly; change only staging, action, framing and scene direction required below. The exact finished product from REFERENCE 2 must remain clearly visible and unchanged. Use neutral, non-sensitive commercial art direction.\n\n${prompt}`,
         })
-      : await openai.images.generate({
+      : openai.images.generate({
           ...sharedOptions,
-          prompt: `OUTPUT FORMAT LOCK: Generate one single photograph that fills the entire canvas. Show one moment in time only. Never divide the canvas or repeat the subject. No collage, montage, diptych, triptych, grid, contact sheet, split screen, multi-panel composition, sequence, before-and-after, inset image, or storyboard sheet.\n\n${imagePrompt}`,
+          prompt: `OUTPUT FORMAT LOCK: Generate one single photograph that fills the entire canvas. Show one moment in time only. Never divide the canvas or repeat the subject. No collage, montage, diptych, triptych, grid, contact sheet, split screen, multi-panel composition, sequence, before-and-after, inset image, or storyboard sheet.\n\n${prompt}`,
         });
+    let result;
+    try {
+      result = await generateFrame(imagePrompt);
+    } catch (error) {
+      if (classifyOpenAIError(error) !== "moderation_blocked") throw error;
+      console.warn(`OpenAI moderation block shot=${shotNumber} requestId=${getOpenAIRequestId(error)} attempt=1`);
+      try {
+        result = await generateFrame(neutralizeImagePrompt(body));
+      } catch (retryError) {
+        if (classifyOpenAIError(retryError) !== "moderation_blocked") throw retryError;
+        console.warn(`OpenAI moderation block shot=${shotNumber} requestId=${getOpenAIRequestId(retryError)} attempt=2`);
+        await markShotBlocked(body, shotNumber);
+        const totalShots = body.totalShots;
+        await updateRunStage(body, totalShots && shotNumber === totalShots ? "frames_ready" : "images_generating", totalShots && shotNumber === totalShots ? `Storyboard ready; frame ${shotNumber} blocked` : `Drawing frame ${shotNumber + 1} of ${totalShots ?? "?"}`, shotNumber);
+        return NextResponse.json({ imageStatus: "blocked", imageError: BLOCKED_REASON });
+      }
+    }
     imageBase64 = result.data?.[0]?.b64_json ?? "";
     if (!imageBase64) throw new Error("OpenAI returned no image bytes");
   } catch (error) {
     console.error(`OpenAI image generation failed for shot ${shotNumber}`, error);
-    await updateRunStage(body, "failed", `Drawing frame ${shotNumber} of ${body.totalShots ?? "?"} failed`, shotNumber - 1);
+    if (body.attempt >= 4) await markShotFailed(body, shotNumber, readableImageError(error));
+    await updateRunStage(body, "images_generating", body.attempt >= 4 ? `Frame ${shotNumber} failed; continuing` : `Retrying frame ${shotNumber}`, shotNumber - 1);
     return imageErrorResponse(error);
   }
 

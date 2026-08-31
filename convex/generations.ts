@@ -53,7 +53,32 @@ export const attachImage = mutation({
       imageStatus: "complete",
       imageStorageId,
       imageUrl,
+      imageError: undefined,
     } : shot);
+    await ctx.db.patch(generationId, { shotList: JSON.stringify(nextShots) });
+    return true;
+  },
+});
+
+export const markImageBlocked = mutation({
+  args: { generationId: v.id("generations"), shotNumber: v.number(), reason: v.string() },
+  handler: async (ctx, { generationId, shotNumber, reason }) => {
+    const generation = await ctx.db.get(generationId);
+    if (!generation) return false;
+    const shots = JSON.parse(generation.shotList) as Array<Record<string, unknown>>;
+    const nextShots = shots.map((shot) => shot.shotNumber === shotNumber ? { ...shot, imageStatus: "blocked", imageError: reason, imageUrl: undefined, imageStorageId: undefined } : shot);
+    await ctx.db.patch(generationId, { shotList: JSON.stringify(nextShots) });
+    return true;
+  },
+});
+
+export const markImageFailed = mutation({
+  args: { generationId: v.id("generations"), shotNumber: v.number(), reason: v.string() },
+  handler: async (ctx, { generationId, shotNumber, reason }) => {
+    const generation = await ctx.db.get(generationId);
+    if (!generation) return false;
+    const shots = JSON.parse(generation.shotList) as Array<Record<string, unknown>>;
+    const nextShots = shots.map((shot) => shot.shotNumber === shotNumber ? { ...shot, imageStatus: "failed", imageError: reason, imageUrl: undefined, imageStorageId: undefined } : shot);
     await ctx.db.patch(generationId, { shotList: JSON.stringify(nextShots) });
     return true;
   },

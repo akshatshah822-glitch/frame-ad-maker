@@ -284,60 +284,77 @@ export default function Home() {
   async function renderShot(shot: Shot, savedGenerationId?: string, references?: { faceReferenceUrl: string; productReferenceUrl: string }, totalShots?: number) {
     updateShot(shot.shotNumber, { imageStatus: "generating", imageError: undefined });
     setCurrentShot(shot.shotNumber);
-    try {
-      const response = await fetch("/api/images", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imagePrompt: shot.imagePrompt,
-          platform: form.platform,
-          shotNumber: shot.shotNumber,
-          generationId: savedGenerationId,
-          runId,
-          totalShots: totalShots ?? generation?.shots.length,
-          ...references,
-        }),
-      });
-      const result = await readJsonResponse<{ error?: string; imageUrl?: string; imageStorageId?: string; faceReferenceUrl?: string; productReferenceUrl?: string }>(response);
-      if (!response.ok) throw new Error(result.error || "This frame couldn't be rendered.");
-      updateShot(shot.shotNumber, {
-        imageStatus: "complete",
-        imageUrl: result.imageUrl,
-        imageStorageId: result.imageStorageId,
-        imageError: undefined,
-      });
-      return result as { faceReferenceUrl?: string; productReferenceUrl?: string };
-    } catch (err) {
-      const stored = await reconcileStoredShot(savedGenerationId, shot.shotNumber);
-      if (stored) {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      try {
+        const response = await fetch("/api/images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imagePrompt: shot.imagePrompt,
+            platform: form.platform,
+            shotNumber: shot.shotNumber,
+            generationId: savedGenerationId,
+            runId,
+            totalShots: totalShots ?? generation?.shots.length,
+            attempt,
+            productPresence: shot.productPresence,
+            locationAndProps: shot.locationAndProps,
+            lighting: shot.lighting,
+            cameraFraming: shot.cameraFraming,
+            cameraAngle: shot.cameraAngle,
+            lensSuggestion: shot.lensSuggestion,
+            cameraMovement: shot.cameraMovement,
+            ...references,
+          }),
+        });
+        const result = await readJsonResponse<{ error?: string; imageStatus?: "complete" | "blocked"; imageError?: string; imageUrl?: string; imageStorageId?: string; faceReferenceUrl?: string; productReferenceUrl?: string }>(response);
+        if (!response.ok) throw new Error(result.error || "This frame couldn't be rendered.");
+        if (result.imageStatus === "blocked") {
+          updateShot(shot.shotNumber, { imageStatus: "blocked", imageError: result.imageError || "This frame was blocked. Reword it and try again." });
+          return { imageStatus: "blocked" as const };
+        }
         updateShot(shot.shotNumber, {
           imageStatus: "complete",
-          imageUrl: stored.imageUrl,
-          imageStorageId: stored.imageStorageId,
+          imageUrl: result.imageUrl,
+          imageStorageId: result.imageStorageId,
           imageError: undefined,
         });
-        return {};
+        return { ...result, imageStatus: "complete" as const };
+      } catch (error) {
+        lastError = error;
+        const stored = await reconcileStoredShot(savedGenerationId, shot.shotNumber);
+        if (stored) {
+          updateShot(shot.shotNumber, {
+            imageStatus: "complete",
+            imageUrl: stored.imageUrl,
+            imageStorageId: stored.imageStorageId,
+            imageError: undefined,
+          });
+          return { imageStatus: "complete" as const };
+        }
+        if (attempt < 4) await new Promise((resolve) => window.setTimeout(resolve, 750 * (2 ** (attempt - 1))));
       }
-      updateShot(shot.shotNumber, {
-        imageStatus: "failed",
-        imageError: err instanceof Error ? err.message : "This frame couldn't be rendered.",
-      });
-      return null;
     }
+    const reason = lastError instanceof Error ? lastError.message : "This frame couldn't be rendered after three retries.";
+    updateShot(shot.shotNumber, { imageStatus: "failed", imageError: reason });
+    return { imageStatus: "failed" as const };
   }
 
   async function renderAllShots(storyboard: Generation, runId: number, savedGenerationId?: string) {
     let references: { faceReferenceUrl: string; productReferenceUrl: string } | undefined;
+    let loadedCount = 0;
     for (const shot of storyboard.shots) {
       if (runIdRef.current !== runId) return;
       const result = await renderShot(shot, savedGenerationId, references, storyboard.shots.length);
-      if (shot.shotNumber === 1 && result?.faceReferenceUrl && result.productReferenceUrl) {
+      if (result.imageStatus === "complete") loadedCount += 1;
+      if (shot.shotNumber === 1 && result.imageStatus === "complete" && result.faceReferenceUrl && result.productReferenceUrl) {
         references = { faceReferenceUrl: result.faceReferenceUrl, productReferenceUrl: result.productReferenceUrl };
       }
     }
     if (runIdRef.current === runId) {
       setCurrentShot(null);
-      setPhase("storyboard_ready");
+      setPhase(loadedCount === storyboard.shots.length ? "storyboard_ready" : "storyboard_incomplete");
     }
   }
 
@@ -385,9 +402,10 @@ export default function Home() {
 
   async function retryShot(shot: Shot) {
     setPhase("images_generating");
-    await renderShot(shot, generationId ?? undefined);
+    const result = await renderShot(shot, generationId ?? undefined);
     setCurrentShot(null);
-    setPhase("storyboard_ready");
+    const otherComplete = generation?.shots.filter((item) => item.shotNumber !== shot.shotNumber && item.imageStatus === "complete").length ?? 0;
+    setPhase(result.imageStatus === "complete" && otherComplete + 1 === generation?.shots.length ? "storyboard_ready" : "storyboard_incomplete");
   }
 
   function restart() {

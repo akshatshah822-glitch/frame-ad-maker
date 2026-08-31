@@ -94,7 +94,7 @@ export type MotionDirection = {
   transitionIntent: string;
 };
 
-export type ImageStatus = "pending" | "generating" | "complete" | "failed";
+export type ImageStatus = "pending" | "generating" | "complete" | "failed" | "blocked";
 
 export type AppPhase =
   | "idle"
@@ -102,6 +102,7 @@ export type AppPhase =
   | "concepts_ready"
   | "storyboard_generating"
   | "images_generating"
+  | "storyboard_incomplete"
   | "storyboard_ready"
   | "error";
 

@@ -8,6 +8,7 @@ import type { AppPhase, Shot, TreatmentData, VideoProduction as Production } fro
 import { useState } from "react";
 import { CompletionActions } from "@/components/completion-actions";
 import { VideoProduction } from "@/components/video-production";
+import { BlockedShotRetry } from "@/components/blocked-shot-retry";
 
 type Props = {
   treatment: TreatmentData;
@@ -28,12 +29,13 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
   const totalFrames = generation.shots.length;
   const completeCount = generation.shots.filter((shot) => shot.imageStatus === "complete").length;
   const availableImageCount = generation.shots.filter((shot) => Boolean(shot.imageUrl)).length;
-  const failedCount = generation.shots.filter((shot) => shot.imageStatus === "failed").length;
-  const unfinishedCount = generation.shots.filter((shot) => shot.imageStatus === "pending" || shot.imageStatus === "generating").length;
-  const ready = phase === "storyboard_ready";
+  const failedCount = generation.shots.filter((shot) => shot.imageStatus === "failed" || shot.imageStatus === "blocked").length;
+  const ready = phase === "storyboard_ready" && completeCount === totalFrames;
+  const incomplete = phase === "storyboard_incomplete" || (phase === "storyboard_ready" && completeCount < totalFrames);
+  const working = phase === "storyboard_generating" || phase === "images_generating";
   const filmReady = videoProduction?.status === "ready" && Boolean(videoProduction.finalVideoUrl);
-  const statusTitle = filmReady ? "FILM READY" : ready ? (unfinishedCount ? `STORYBOARD SAVED · ${completeCount}/${totalFrames} FRAMES` : failedCount ? `STORYBOARD READY · ${completeCount}/${totalFrames} FRAMES` : "STORYBOARD READY") : phase === "storyboard_generating" ? "DEVELOPING THE VISUAL WORLD" : "BUILDING THE STORYBOARD";
-  const statusCopy = filmReady ? "Your finished film is ready to watch and share." : ready ? (unfinishedCount ? `${unfinishedCount} ${unfinishedCount === 1 ? "frame was" : "frames were"} not finished in this saved treatment.` : failedCount ? `${failedCount === 1 ? "One frame couldn't" : `${failedCount} frames couldn't`} be rendered. The treatment is ready to use.` : "Your treatment and frames are ready to share.") : `${progressStep || (currentShot ? `Drawing frame ${currentShot} of ${totalFrames}` : "Building the storyboard")} · ${progressElapsed}s elapsed`;
+  const statusTitle = filmReady ? "FILM READY" : ready ? "STORYBOARD READY" : incomplete ? `STORYBOARD INCOMPLETE · ${completeCount}/${totalFrames} FRAMES` : phase === "images_generating" ? `GENERATING ${completeCount} OF ${totalFrames}` : phase === "storyboard_generating" ? "DEVELOPING THE VISUAL WORLD" : "BUILDING THE STORYBOARD";
+  const statusCopy = filmReady ? "Your finished film is ready to watch and share." : ready ? "Your treatment and all frames are ready to share." : incomplete ? `${failedCount} ${failedCount === 1 ? "frame needs" : "frames need"} attention. Retry only the affected frame below.` : `${progressStep || (currentShot ? `Drawing frame ${currentShot} of ${totalFrames}` : "Building the storyboard")} · ${progressElapsed}s elapsed`;
   const playFilm = () => {
     const video = document.querySelector<HTMLVideoElement>(".final-ad video");
     video?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -43,7 +45,7 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
   return <main className="page result-page">
     <header className="topbar">{onRestart ? <button className="wordmark" type="button" onClick={onRestart}>FRAME<span>{"///"}</span></button> : <Link className="wordmark" href="/">FRAME<span>{"///"}</span></Link>}<span>30 sec ad maker</span>{onRestart ? <button className="new-button" type="button" onClick={onRestart}>Start over</button> : <Link className="new-button" href="/">Create your own</Link>}</header>
     <section className="treatment-header"><p className="eyebrow">Approved creative direction</p><div><span>Concept name</span><h1>{concept.conceptName || generation.title}</h1><p>{concept.idea || generation.title}</p>{brief.intent === "performance" && concept.whatThisTests && concept.whatThisTests !== "Not applicable" ? <div className="treatment-strategy"><small>WHAT THIS TESTS</small><strong>{concept.whatThisTests}</strong></div> : null}{brief.intent === "cinematic" ? <div className="treatment-strategy"><small>LOGLINE</small><strong>{concept.logline || concept.idea}</strong>{concept.humanTruth && concept.humanTruth !== "Not applicable" ? <p><b>Human truth:</b> {concept.humanTruth}</p> : null}{concept.emotionalArc && concept.emotionalArc !== "Not applicable" ? <p><b>Emotional arc:</b> {concept.emotionalArc}</p> : null}</div> : null}</div><aside><small>FORMAT</small><strong>{generation.duration}</strong><small>PLATFORM</small><strong>{brief.platform}</strong></aside></section>
-    <section className={`completion-state ${ready ? "is-ready" : "is-working"}`} aria-live="polite" aria-busy={!ready}>
+    <section className={`completion-state ${ready ? "is-ready" : "is-working"}`} aria-live="polite" aria-busy={working}>
       <span className="completion-mark" aria-hidden="true">{ready ? "✓" : ""}</span><div><small>{statusTitle}</small><strong>{statusCopy}</strong></div>
       {ready ? <div className="completion-actions-wrap">{filmReady ? <button className="primary-button" type="button" onClick={playFilm}>Watch film <span aria-hidden="true">↓</span></button> : null}<CompletionActions treatment={treatment} onRestart={onRestart} filmReady={filmReady} canDownloadVideo={totalFrames === 6 && availableImageCount === 6} /></div> : null}
     </section>
@@ -53,7 +55,7 @@ export function TreatmentView({ treatment, phase = "storyboard_ready", saved = t
       const display = getShotDisplay(shot);
       return <article className="treatment-shot" key={shot.shotNumber}>
         <figure className="shot-frame" data-format={getPlatformFormat(brief.platform)} data-status={shot.imageStatus}>
-          {shot.imageUrl ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${display.visual}`} fill sizes="(max-width: 750px) 100vw, 50vw" priority={index < 2} unoptimized crossOrigin="anonymous" data-storyboard-frame /> : shot.imageStatus === "failed" ? <div className="shot-frame-failed"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.imageError ?? "This frame couldn't be rendered."}</p>{onRetryShot ? <button type="button" onClick={() => onRetryShot(shot)}>Retry frame</button> : null}</div> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><small>{shot.imageStatus === "generating" ? "Directing this frame…" : "Waiting for direction"}</small></div>}
+          {shot.imageUrl ? <Image src={shot.imageUrl} alt={`Shot ${shot.shotNumber}: ${display.visual}`} fill sizes="(max-width: 750px) 100vw, 50vw" priority={index < 2} unoptimized crossOrigin="anonymous" data-storyboard-frame /> : (shot.imageStatus === "blocked" || shot.imageStatus === "failed") && treatment.id ? <BlockedShotRetry shot={shot} generationId={treatment.id} platform={brief.platform} totalShots={totalFrames} /> : shot.imageStatus === "failed" ? <div className="shot-frame-failed"><span>FRAME / 0{shot.shotNumber}</span><p>{shot.imageError ?? "This frame couldn't be rendered."}</p>{onRetryShot ? <button type="button" onClick={() => onRetryShot(shot)}>Retry frame</button> : null}</div> : <div className="shot-frame-pending"><span>FRAME / 0{shot.shotNumber}</span><small>{shot.imageStatus === "generating" ? "Directing this frame…" : "Waiting for direction"}</small></div>}
         </figure>
         <header className="shot-heading"><div><span>{String(shot.shotNumber).padStart(2, "0")}</span><h2>{shot.narrativeBeat || shot.purpose}</h2></div><time>{shot.startTime}–{shot.endTime} sec</time></header>
         <div className="shot-summary">

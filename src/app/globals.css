@@ -257,6 +257,11 @@ input:focus,textarea:focus,select:focus { border-color:var(--coral); box-shadow:
 .shot-frame-pending p,.shot-frame-failed p { position:relative; z-index:1; align-self:center; max-width:80%; margin:auto; color:#fff; font:800 clamp(18px,2.2vw,30px)/1.15 "Arial Narrow",Arial,sans-serif; letter-spacing:-.03em; text-align:center; text-wrap:balance; }
 .shot-frame-failed { background:#283048; }
 .shot-frame-failed button { position:relative; z-index:1; justify-self:start; min-height:44px; border:1px solid var(--coral); background:transparent; color:#fff; padding:10px 12px; font-size:8px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+.blocked-shot-form { position:absolute; inset:0; z-index:2; display:grid; align-content:center; gap:10px; padding:18px; background:#283048; color:#fff; }
+.blocked-shot-form label { color:var(--coral); font-size:8px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+.blocked-shot-form textarea { width:100%; min-height:42%; resize:vertical; border:1px solid #9eabc3; background:#17233e; color:#fff; padding:10px; font:600 11px/1.4 Arial,sans-serif; }
+.blocked-shot-form button { min-height:44px; border:1px solid var(--coral); background:var(--coral); color:var(--ink); padding:10px 12px; font-size:8px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+.blocked-shot-form small { color:#c9d0dd; font-size:9px; line-height:1.35; }
 .shot-frame figcaption { position:absolute; right:0; bottom:0; display:flex; gap:1px; }
 .shot-frame figcaption span { background:rgba(16,27,54,.9); padding:7px 9px; color:#dce2ee; font-size:7px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
 .shot-treatment { display:grid; grid-template-columns:1.35fr 1fr; gap:0; margin-top:18px; border-top:1px solid var(--line); }

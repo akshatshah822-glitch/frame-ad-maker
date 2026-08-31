@@ -26,6 +26,12 @@ const platformImages: Record<string, { promptRatio: string; apiSize: string }> =
 };
 
 export const supportedPlatforms = Object.keys(platformImages);
+const PERSON_DESCRIPTOR = /\b(body|appearance|age|aged|young|old|clothing|clothes|wardrobe|outfit|dress|shirt|blouse|sari|saree|skin|complexion|hair|hairstyle|ethnicity|race|racial|physique|figure|build|chest|legs?|bare|attractive|beautiful|handsome)\b/i;
+
+function safeDirection(value: string, fallback: string) {
+  const safeParts = value.split(/(?<=[.!?;])\s+|\n+/).filter((part) => !PERSON_DESCRIPTOR.test(part));
+  return safeParts.join(" ").trim() || fallback;
+}
 
 export function getImageSize(platform: string) {
   return platformImages[platform]?.apiSize ?? "1824x1024";
@@ -38,11 +44,11 @@ export function getPlatformFormat(platform: string) {
 }
 
 export function buildImagePrompt({
-  intent, selectedConcept, narrativeStructure, storyContext, purpose, subjectAction, cameraFraming, cameraAngle, lensSuggestion,
+  intent, subjectAction, cameraFraming, cameraAngle, lensSuggestion,
   cameraMovement, lighting, locationAndProps, selectedTone, platform, visualBible,
 }: ImagePromptInput): string {
   const palette = visualBible.colorPalette.join(", ");
-  const continuityLocks = visualBible.continuityLocks.map((lock) => `- ${lock}`).join("\n");
+  const continuityLocks = visualBible.continuityLocks.filter((lock) => !PERSON_DESCRIPTOR.test(lock)).map((lock) => `- ${lock}`).join("\n") || "- Same product, set, lighting and camera language";
   const aspectRatio = platformImages[platform]?.promptRatio ?? "16:9 landscape";
 
   return `Create a photorealistic cinematic advertising frame.
@@ -52,29 +58,14 @@ Generate exactly one cinematic production frame. No collage, no montage grid, no
 CREATIVE INTENT
 ${intent === "performance" ? "Performance advertisement" : "Cinematic story"}
 
-SELECTED CONCEPT
-${selectedConcept}
-
-NARRATIVE STRUCTURE
-${narrativeStructure}
-
-STORY CONTEXT
-${storyContext}
-
-SHOT PURPOSE
-${purpose}
-
-SUBJECT
-${visualBible.subject}
-
 PRODUCT
 ${visualBible.product}
 
 LOCATION
-${visualBible.location}
+${safeDirection(visualBible.location, "A neutral professional setting.")}
 
 ACTION
-${subjectAction}
+${safeDirection(subjectAction, "The subject completes one clear product-focused action.")}
 
 COMPOSITION
 ${cameraFraming}
@@ -95,16 +86,14 @@ Shared lighting direction: ${visualBible.lighting}
 Lighting must be physically motivated by the environment.
 
 PRODUCTION DESIGN
-${locationAndProps}
+${safeDirection(locationAndProps, "Minimal neutral set dressing and props.")}
 
 COLOR
 ${palette}
 
 TEXTURE
-Natural skin texture.
-Real fabric folds.
 Physically believable product materials.
-${visualBible.texture}
+${safeDirection(visualBible.texture, "Physically believable materials and subtle film texture.")}
 Subtle film grain where appropriate.
 Realistic highlights and shadows.
 

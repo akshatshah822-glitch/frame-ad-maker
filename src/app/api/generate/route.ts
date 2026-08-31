@@ -204,8 +204,8 @@ ${intent === "performance" ? "- The complete sequence must accomplish attention,
 
 CONTINUITY RULES
 - All shots must feel like scenes from one film, not disconnected images.
-- Preserve the same character where applicable, including physical description and age.
-- Preserve the same wardrobe, product appearance, location logic, visual palette, and cinematic style.
+- Preserve character identity through role, action and blocking only; never describe their body, appearance or clothing.
+- Preserve the same product appearance, location logic, visual palette, and cinematic style.
 - Make the narrative action progress clearly from shot to shot.
 - Keep the approved concept fixed. Do not replace it with a new idea.
 - Make the single-minded proposition impossible to miss through visual storytelling.
@@ -214,13 +214,13 @@ CONTINUITY RULES
 
 VISUAL BIBLE
 - Generate one shared Visual Bible before defining the shots.
-- Subject must lock exact appearance, approximate age, wardrobe, styling, hair, and distinguishing characteristics.
+- Subject must describe role, action and blocking only. Never describe body, appearance, age, clothing, wardrobe, styling, hair, skin, ethnicity or physical characteristics.
 - Product must lock exact materials, shape, proportions, finish, surface texture, and defining visual features.
 - Location must lock the environment, architecture, surfaces, props, and background details.
 - Use no more than four dominant colors.
 - Lighting must define source, direction, softness, contrast, time of day, and practical lights.
 - Cinematography must define camera character, lens family, depth of field, framing philosophy, and movement style.
-- Texture must define skin, fabric, material, atmosphere, and film character.
+- Texture must define product material, environment, atmosphere, and film character only.
 - Continuity locks must explicitly list everything that cannot change across the complete sequence.
 - Avoid plastic skin, inconsistent faces, random background objects, unnecessary neon, excessive bokeh, inconsistent wardrobe, inconsistent product shape, warped jewellery or products, and text inside images.
 
@@ -231,6 +231,7 @@ BRAND BIBLE AND CREATIVE GRAMMAR
 - Creative Grammar must define how this specific ad communicates: arc, hook, reveal, performance, edit rhythm, camera, copy, humour, audio, brand reveal, CTA and platform behaviour.
 
 SHOT DIRECTION
+- IMAGE SAFETY LOCK: Describe only action, product, environment, lighting and camera. Never describe a person's body, appearance or clothing except the minimum product contact needed to show the advertised product.
 - Every shot must depict exactly one continuous moment that can become one edge-to-edge production frame. Never put a match cut, before-and-after, multiple locations, or two moments inside one shot's visualDescription, displayVisual, subjectAction, or productAction. transitionIntent may describe the cut to the next shot, but the current frame must remain a single moment.
 - displayVisual must be one plain, filmable sentence of roughly 8–20 words.
 - displayCamera must be one concise instruction combining framing, lens, and movement, such as "85mm close-up · slow push-in".
