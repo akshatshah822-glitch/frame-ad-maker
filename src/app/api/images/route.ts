@@ -5,6 +5,7 @@ import OpenAI, { toFile } from "openai";
 import sharp from "sharp";
 import { getImageSize, supportedPlatforms } from "@/lib/image-prompt";
 import { classifyOpenAIError } from "@/lib/openai-error";
+import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 export const maxDuration = 120;
 
@@ -15,7 +16,7 @@ type ImageRequest = {
   generationId?: string;
   faceReferenceUrl?: string;
   productReferenceUrl?: string;
-  runId?: string;
+  runId?: string | number;
   totalShots?: number;
 };
 
@@ -124,7 +125,7 @@ async function resolveReferences(body: ImageRequest) {
   return { faceReferenceUrl: String(record.faceReferenceUrl), productReferenceUrl: String(record.productReferenceUrl) };
 }
 
-export async function POST(request: Request) {
+const post = async (request: Request) => {
   let body: ImageRequest;
   try {
     body = await request.json() as ImageRequest;
@@ -132,8 +133,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "The frame request could not be read." }, { status: 400 });
   }
 
-  const imagePrompt = body.imagePrompt?.trim();
-  const platform = body.platform?.trim();
+  const imagePrompt = String(body.imagePrompt ?? "").trim();
+  const platform = String(body.platform ?? "").trim();
+  body.runId = String(body.runId ?? "").trim() || undefined;
   const shotNumber = body.shotNumber;
   if (!imagePrompt || imagePrompt.length > 32_000 || !platform || !supportedPlatforms.includes(platform) || !Number.isInteger(shotNumber) || !shotNumber || shotNumber < 1 || shotNumber > 10) {
     return NextResponse.json({ error: "This frame is missing valid production direction." }, { status: 400 });
@@ -187,4 +189,12 @@ export async function POST(request: Request) {
       storageWarning: true,
     });
   }
-}
+};
+
+export const POST = withJsonErrors(post);
+export const GET = methodNotAllowed(["POST"]);
+export const HEAD = methodNotAllowed(["POST"]);
+export const PUT = methodNotAllowed(["POST"]);
+export const PATCH = methodNotAllowed(["POST"]);
+export const DELETE = methodNotAllowed(["POST"]);
+export const OPTIONS = methodNotAllowed(["POST"]);

@@ -5,7 +5,8 @@ import { anyApi } from "convex/server";
 import type { Concept } from "@/lib/types";
 import { supportedPlatforms } from "@/lib/image-prompt";
 import { classifyOpenAIError } from "@/lib/openai-error";
-import { findUnsupportedProof, proofSafetyInstruction } from "@/lib/proof-safety";
+import { findUnsupportedProof, neutralizeUnsupportedProof, proofSafetyInstruction } from "@/lib/proof-safety";
+import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
 type ConceptBrief = {
   intent?: string;
@@ -17,7 +18,7 @@ type ConceptBrief = {
   testObjective?: string;
   testObjectiveOther?: string;
   preserveDetails?: string;
-  runId?: string;
+  runId?: string | number;
 };
 
 async function updateRun(runId: string | undefined, action: "ready" | "failed", value: Concept[] | string) {
@@ -81,7 +82,7 @@ function parseConcepts(outputText: string): Concept[] | null {
   }
 }
 
-export async function POST(request: Request) {
+const post = async (request: Request) => {
   let body: ConceptBrief;
   try {
     body = (await request.json()) as ConceptBrief;
@@ -89,18 +90,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "The creative brief could not be read. Please try again." }, { status: 400 });
   }
 
-  const brandProduct = body.brandProduct?.trim();
+  const brandProduct = String(body.brandProduct ?? "").trim();
   const intent = body.intent === "cinematic" ? "cinematic" : "performance";
-  const audience = body.audience?.trim();
-  const proposition = body.proposition?.trim();
-  const platform = body.platform?.trim();
-  const visualTones = body.visualTones?.map((tone) => tone.trim()).filter(Boolean);
-  const testObjective = body.testObjective?.trim();
-  const testObjectiveOther = body.testObjectiveOther?.trim();
-  const preserveDetails = body.preserveDetails?.trim();
-  const runId = body.runId?.trim();
+  const audience = String(body.audience ?? "").trim();
+  const proposition = String(body.proposition ?? "").trim();
+  const platform = String(body.platform ?? "").trim();
+  const visualTones = Array.isArray(body.visualTones) ? body.visualTones.map((tone) => String(tone ?? "").trim()).filter(Boolean) : [];
+  const testObjective = String(body.testObjective ?? "").trim();
+  const testObjectiveOther = String(body.testObjectiveOther ?? "").trim();
+  const preserveDetails = String(body.preserveDetails ?? "").trim();
+  const runId = String(body.runId ?? "").trim();
 
-  if (!brandProduct || !audience || !proposition || !platform || !visualTones?.length) {
+  if (!brandProduct || !audience || !proposition || !platform || !visualTones.length) {
     return NextResponse.json({ error: "Please complete the brief before generating concepts." }, { status: 400 });
   }
   if (intent === "performance" && (!testObjective || !testOptions.includes(testObjective) || (testObjective === "Other" && !testObjectiveOther))) {
@@ -215,14 +216,21 @@ ${intent === "performance" ? `Test objective: ${testObjective === "Other" ? test
         text: { format: { type: "json_schema", name: "repaired_creative_concepts", strict: true, schema: conceptsSchema } },
       });
       const repairedConcepts = parseConcepts(repaired.output_text);
-      if (!repairedConcepts || findUnsupportedProof(repairedConcepts, suppliedSource).length) {
+      if (!repairedConcepts) {
         console.error("Concept proof-safety repair remained unsafe", proofIssues);
         const message = "We couldn't develop claim-safe concepts from this brief. Add a supported reason to believe or try again.";
         await updateRun(runId, "failed", message);
         return NextResponse.json({ error: message }, { status: 422 });
       }
-      await updateRun(runId, "ready", repairedConcepts);
-      return NextResponse.json({ concepts: repairedConcepts });
+      const safeConcepts = neutralizeUnsupportedProof(repairedConcepts, suppliedSource);
+      if (findUnsupportedProof(safeConcepts, suppliedSource).length) {
+        console.error("Concept proof-safety deterministic repair remained unsafe", proofIssues);
+        const message = "We couldn't safely verify the proof in these concepts. Try again.";
+        await updateRun(runId, "failed", message);
+        return NextResponse.json({ error: message }, { status: 422 });
+      }
+      await updateRun(runId, "ready", safeConcepts);
+      return NextResponse.json({ concepts: safeConcepts });
     } catch (error) {
       console.error("Concept proof-safety repair failed", error);
       const message = "We couldn't safely verify the proof in these concepts. Try again.";
@@ -233,4 +241,12 @@ ${intent === "performance" ? `Test objective: ${testObjective === "Other" ? test
 
   await updateRun(runId, "ready", concepts);
   return NextResponse.json({ concepts });
-}
+};
+
+export const POST = withJsonErrors(post);
+export const GET = methodNotAllowed(["POST"]);
+export const HEAD = methodNotAllowed(["POST"]);
+export const PUT = methodNotAllowed(["POST"]);
+export const PATCH = methodNotAllowed(["POST"]);
+export const DELETE = methodNotAllowed(["POST"]);
+export const OPTIONS = methodNotAllowed(["POST"]);

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { TreatmentView } from "@/components/treatment-view";
 import type { AppPhase, Brief, Concept, Generation, Shot } from "@/lib/types";
 import { track } from "@/lib/analytics";
+import { readJsonResponse } from "@/lib/read-json-response";
 
 const conceptTypes = ["Human / Emotional", "Product / Craft-led", "Unexpected / Conceptual"] as const;
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"] as const;
@@ -51,7 +52,6 @@ export default function Home() {
   const submitButtonRef = useRef<HTMLButtonElement | null>(null);
   const briefStartedRef = useRef(false);
   const directionsShownRef = useRef(false);
-  const filmShownRef = useRef(false);
   const jewelleryFilmRef = useRef<HTMLVideoElement | null>(null);
   const [submittedSignupSources, setSubmittedSignupSources] = useState<string[]>([]);
   const [signupError, setSignupError] = useState("");
@@ -134,7 +134,7 @@ export default function Home() {
     const email = String(new FormData(event.currentTarget).get("email") || "");
     const response = await fetch("/api/signups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, source }) });
     if (!response.ok) {
-      const result = await response.json().catch(() => null);
+      const result = await readJsonResponse<{ error?: string }>(response);
       setSignupError(result?.error || "We couldn't save that email. Try again.");
       return;
     }
@@ -155,8 +155,8 @@ export default function Home() {
     const poll = async () => {
       try {
         const response = await fetch(`/api/runs/${runId}`, { cache: "no-store" });
-        const result = await response.json();
-        if (!stopped && response.ok) {
+        const result = await readJsonResponse<{ run?: { step?: string; status?: string; error?: string } }>(response);
+        if (!stopped && response.ok && result.run) {
           setRunStep(result.run.step || "");
           setRunError(result.run.status === "failed" ? result.run.error || "This step failed." : "");
         }
@@ -203,23 +203,30 @@ export default function Home() {
         body: JSON.stringify({ clientId: clientId(), brief: form }),
         signal: controller.signal,
       });
-      const runResult = await runResponse.json();
-      if (!runResponse.ok || !runResult.runId) throw new Error(runResult.error || "The run could not be started.");
-      setRunId(runResult.runId);
+      const runResult = await readJsonResponse<{ runId?: unknown; error?: string }>(runResponse);
+      const createdRunId = String(runResult.runId ?? "").trim();
+      if (!runResponse.ok || !createdRunId) throw new Error(runResult.error || "The run could not be started.");
+      setRunId(createdRunId);
       const response = await fetch("/api/concepts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, runId: runResult.runId }),
+        body: JSON.stringify({ ...form, runId: createdRunId }),
         signal: controller.signal,
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Something went wrong.");
-      const statusResponse = await fetch(`/api/runs/${runResult.runId}`, { cache: "no-store", signal: controller.signal });
-      const statusResult = await statusResponse.json();
-      const persistedConcepts = statusResult.run?.status === "directions_ready" && statusResult.run?.concepts ? JSON.parse(statusResult.run.concepts) : null;
-      if (!statusResponse.ok || !Array.isArray(persistedConcepts) || persistedConcepts.length !== 3) throw new Error(statusResult.run?.error || "The concepts came back incomplete. Please generate them again.");
+      const result = await readJsonResponse<{ concepts?: Concept[]; error?: string }>(response);
+      if (!response.ok) throw new Error(result.error || "The creative directions could not be generated.");
+      if (!Array.isArray(result.concepts) || result.concepts.length !== 3) throw new Error("The creative directions came back incomplete. Please generate them again.");
+      let availableConcepts = result.concepts;
+      try {
+        const statusResponse = await fetch(`/api/runs/${createdRunId}`, { cache: "no-store", signal: controller.signal });
+        const statusResult = await readJsonResponse<{ run?: { concepts?: string } }>(statusResponse);
+        const persistedConcepts = statusResponse.ok && statusResult.run?.concepts ? JSON.parse(statusResult.run.concepts) : null;
+        if (Array.isArray(persistedConcepts) && persistedConcepts.length === 3) availableConcepts = persistedConcepts;
+      } catch {
+        // The generated directions remain usable if persistence is briefly unavailable.
+      }
       if (requestRun !== runIdRef.current) return;
-      setConcepts(persistedConcepts);
+      setConcepts(availableConcepts);
       setSelectedConcept(null);
       setPhase("concepts_ready");
     } catch (err) {
@@ -264,7 +271,7 @@ export default function Home() {
       try {
         const response = await fetch(`/api/treatments/${savedGenerationId}`, { cache: "no-store" });
         if (!response.ok) continue;
-        const result = await response.json() as { treatment?: { generation?: Generation } };
+        const result = await readJsonResponse<{ treatment?: { generation?: Generation } }>(response);
         const stored = result.treatment?.generation?.shots.find((item) => item.shotNumber === shotNumber);
         if (stored?.imageStatus === "complete" && stored.imageUrl) return stored;
       } catch {
@@ -291,7 +298,7 @@ export default function Home() {
           ...references,
         }),
       });
-      const result = await response.json();
+      const result = await readJsonResponse<{ error?: string; imageUrl?: string; imageStorageId?: string; faceReferenceUrl?: string; productReferenceUrl?: string }>(response);
       if (!response.ok) throw new Error(result.error || "This frame couldn't be rendered.");
       updateShot(shot.shotNumber, {
         imageStatus: "complete",
@@ -337,7 +344,7 @@ export default function Home() {
   async function generateStoryboard(concept: Concept) {
     if (generationRunRef.current) return;
     generationRunRef.current = true;
-    const runId = ++runIdRef.current;
+    const generationRun = ++runIdRef.current;
     setSelectedConcept(concept);
     setPhase("storyboard_generating");
     setCurrentShot(null);
@@ -360,15 +367,15 @@ export default function Home() {
           runId,
         }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Something went wrong.");
+      const result = await readJsonResponse<{ generation?: Generation; generationId?: string; saved?: boolean; error?: string }>(response);
+      if (!response.ok || !result.generation) throw new Error(result.error || "The storyboard response was incomplete. Try again.");
       setGeneration(result.generation);
       setGenerationId(result.generationId ?? null);
-      setSaved(result.saved);
+      setSaved(result.saved ?? false);
       setPhase("images_generating");
-      await renderAllShots(result.generation, runId, result.generationId);
+      await renderAllShots(result.generation, generationRun, result.generationId);
     } catch (err) {
-      if (runIdRef.current !== runId) return;
+      if (runIdRef.current !== generationRun) return;
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setPhase("error");
     } finally {
@@ -414,7 +421,7 @@ export default function Home() {
     <header className="topbar landing-nav"><span className="wordmark">FRAME<span>{"///"}</span></span><nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#brief">Create an ad</a></nav><a className="nav-cta" href="#brief">Start with a brief <span>↗</span></a></header>
     <section className="launch-hero">
       <h1>Turn your brief into the film.</h1>
-      <video autoPlay muted loop playsInline preload="metadata" poster="/frame-launch-poster.jpg" aria-label="A finished advertisement created with FRAME" onPlay={() => { if (!filmShownRef.current && !window.sessionStorage.getItem("frame-film-shown")) { filmShownRef.current = true; window.sessionStorage.setItem("frame-film-shown", "1"); track("film_shown"); } }}><source src="/frame-launch-ad.mp4" type="video/mp4" /></video>
+      <video autoPlay muted loop playsInline preload="metadata" poster="/frame-launch-poster.jpg" aria-label="A finished advertisement created with FRAME"><source src="/frame-launch-ad.mp4" type="video/mp4" /></video>
       <a className="launch-primary" href="#brief">Create an ad <span>↗</span></a>
       <div className="example-briefs" aria-label="Try an example brief">{exampleBriefs.map((example) => { const selected = form.brandProduct === example.brief.brandProduct; return <a key={example.label} data-selected={selected} aria-current={selected ? "true" : undefined} href={`/?example=${example.slug}#brief`}>{example.label}</a>; })}</div>
     </section>

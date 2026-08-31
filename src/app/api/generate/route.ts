@@ -6,10 +6,13 @@ import { buildImagePrompt } from "@/lib/image-prompt";
 import type { BrandBible, Concept, CreativeGrammar, Generation, Shot, VisualBible } from "@/lib/types";
 import { classifyOpenAIError } from "@/lib/openai-error";
 import { findUnsupportedProof, proofSafetyInstruction } from "@/lib/proof-safety";
+import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
-type StoryboardBrief = { intent?: string; testObjective?: string; testObjectiveOther?: string; preserveDetails?: string; brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown; qaTargetShotCount?: number; runId?: string };
+type StoryboardBrief = { intent?: string; testObjective?: string; testObjectiveOther?: string; preserveDetails?: string; brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown; qaTargetShotCount?: number; runId?: string | number };
 type ModelShot = Omit<Shot, "imagePrompt" | "imageStatus" | "imageUrl" | "imageStorageId" | "imageError">;
 type ModelGeneration = { title: string; duration: string; brandBible: BrandBible; creativeGrammar: CreativeGrammar; visualBible: VisualBible; shots: ModelShot[] };
+type ExternalApiCall = <T>(call: () => Promise<T>) => Promise<T>;
+type ValidatedStoryboardBrief = Required<Pick<StoryboardBrief, "brandProduct" | "audience" | "proposition" | "platform" | "visualTones" | "selectedConcept">> & { intent: "performance" | "cinematic"; testObjective: string; testObjectiveOther: string; preserveDetails: string; qaTargetShotCount?: number; runId: string };
 
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"];
 const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"];
@@ -21,6 +24,42 @@ const brandBibleStringFields = ["brandName", "category", "product", "audience", 
 const brandBibleArrayFields = ["brandPersonality", "brandColors", "productDesignLocks", "packagingLocks", "logoRules", "characterOrMascotRules", "thingsBrandWouldDo", "thingsBrandWouldNeverDo"] as const;
 const grammarFields = ["creativeArchetype", "emotionalArc", "hookMechanism", "productRevealStrategy", "performanceStyle", "editingRhythm", "cameraPhilosophy", "copyDensity", "humourLevel", "audioRole", "brandRevealStyle", "ctaBehaviour", "platformBehaviour"] as const;
 const motionFields = ["startState", "endState", "startPosition", "movementPath", "endPosition", "subjectMotion", "productMotion", "cameraMotion", "environmentMotion", "focusMotion", "performanceBeat", "gazeAndExpression", "transitionIntent"] as const;
+
+function jsonByteLength(value: unknown) {
+  const json = JSON.stringify(value);
+  return json ? new TextEncoder().encode(json).length : 0;
+}
+
+function loggedJson(body: unknown, init?: ResponseInit) {
+  console.log(`RETURNING bytes: ${jsonByteLength(body)}`);
+  return NextResponse.json(body, init);
+}
+
+function validateStoryboardBrief(value: unknown): { brief: ValidatedStoryboardBrief; error?: never } | { brief?: never; error: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { error: "request body must be a JSON object." };
+  const body = value as Record<string, unknown>;
+  const brandProduct = String(body.brandProduct ?? "").trim();
+  const audience = String(body.audience ?? "").trim();
+  const proposition = String(body.proposition ?? "").trim();
+  const platform = String(body.platform ?? "").trim();
+  const runId = String(body.runId ?? "").trim();
+  const intentValue = String(body.intent ?? "performance").trim();
+  const testObjective = String(body.testObjective ?? "").trim();
+  const testObjectiveOther = String(body.testObjectiveOther ?? "").trim();
+  const preserveDetails = String(body.preserveDetails ?? "").trim();
+  if (body.visualTones != null && !Array.isArray(body.visualTones)) return { error: "visualTones must be an array." };
+  const visualTones = (body.visualTones ?? []).map((tone) => String(tone ?? "").trim()).filter(Boolean);
+  if (!brandProduct) return { error: "brandProduct is required." };
+  if (!audience) return { error: "audience is required." };
+  if (!proposition) return { error: "proposition is required." };
+  if (!platform) return { error: "platform is required." };
+  if (!visualTones.length) return { error: "visualTones must contain at least one value." };
+  if (!runId) return { error: "runId is required." };
+  if (intentValue !== "performance" && intentValue !== "cinematic") return { error: "intent must be performance or cinematic." };
+  if (!body.selectedConcept || typeof body.selectedConcept !== "object" || Array.isArray(body.selectedConcept)) return { error: "selectedConcept must be an object." };
+  if (body.qaTargetShotCount != null && (!Number.isInteger(body.qaTargetShotCount) || Number(body.qaTargetShotCount) < 4 || Number(body.qaTargetShotCount) > 8)) return { error: "qaTargetShotCount must be an integer from 4 to 8." };
+  return { brief: { brandProduct, audience, proposition, platform, visualTones, runId, intent: intentValue, testObjective, testObjectiveOther, preserveDetails, selectedConcept: body.selectedConcept, qaTargetShotCount: body.qaTargetShotCount as number | undefined } };
+}
 
 function isConcept(value: unknown): value is Concept {
   if (!value || typeof value !== "object") return false;
@@ -120,9 +159,9 @@ function parseGeneration(outputText: string): ModelGeneration | null {
   }
 }
 
-async function makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount }: { intent: "performance" | "cinematic"; testObjective?: string; preserveDetails?: string; brandProduct: string; audience: string; proposition: string; platform: string; visualTones: string[]; selectedConcept: Concept; qaTargetShotCount?: number }) {
+async function makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount, externalApiCall }: { intent: "performance" | "cinematic"; testObjective?: string; preserveDetails?: string; brandProduct: string; audience: string; proposition: string; platform: string; visualTones: string[]; selectedConcept: Concept; qaTargetShotCount?: number; externalApiCall: ExternalApiCall }) {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const response = await client.responses.create({
+  const response = await externalApiCall(() => client.responses.create({
     model: "gpt-5-mini",
     reasoning: { effort: "minimal" },
     input: `You are the narrative architect and storyboard director of an elite advertising studio. Develop the approved creative concept into one coherent, production-ready 30-second ${intent === "performance" ? "performance advertisement" : "cinematic visual story"}.
@@ -209,19 +248,19 @@ ${proofSafetyInstruction}
 
 Return only the structured storyboard.`,
     text: { format: { type: "json_schema", name: "concept_led_storyboard", strict: true, schema: outputSchema } },
-  });
+  }));
   let modelGeneration = parseGeneration(response.output_text);
   if (!modelGeneration) return null;
   const suppliedSource = [brandProduct, audience, proposition, testObjective, preserveDetails].filter(Boolean).join("\n");
   const proofIssues = findUnsupportedProof(modelGeneration, suppliedSource);
   if (proofIssues.length) {
-    const repaired = await client.responses.create({
+    const repaired = await externalApiCall(() => client.responses.create({
       model: "gpt-5-mini",
       reasoning: { effort: "minimal" },
       instructions: `You are a strict advertising compliance editor. Repair the supplied storyboard without changing its concept, shot count, timings, narrative beats, or visual continuity.\n\n${proofSafetyInstruction}`,
       input: `USER-SUPPLIED SOURCE OF TRUTH\n${suppliedSource}\n\nUNSUPPORTED PROOF FOUND\n${proofIssues.join(", ")}\n\nSTORYBOARD TO REPAIR\n${JSON.stringify(modelGeneration)}\n\nReturn the complete repaired storyboard.`,
       text: { format: { type: "json_schema", name: "repaired_concept_led_storyboard", strict: true, schema: outputSchema } },
-    });
+    }));
     modelGeneration = parseGeneration(repaired.output_text);
     if (!modelGeneration || findUnsupportedProof(modelGeneration, suppliedSource).length) return null;
   }
@@ -244,65 +283,76 @@ Return only the structured storyboard.`,
   };
 }
 
-export async function POST(request: Request) {
-  let body: StoryboardBrief;
-  try { body = (await request.json()) as StoryboardBrief; }
-  catch { return NextResponse.json({ error: "The storyboard brief could not be read. Please try again." }, { status: 400 }); }
+const post = async (request: Request) => {
+  let rawBody: unknown;
+  try { rawBody = await request.json(); }
+  catch { return loggedJson({ error: "The storyboard brief could not be read. Please try again." }, { status: 400 }); }
+  const validation = validateStoryboardBrief(rawBody);
+  if ("error" in validation) return loggedJson({ error: validation.error }, { status: 400 });
+  const body = validation.brief;
 
-  const brandProduct = body.brandProduct?.trim();
-  const runId = body.runId?.trim();
-  const intent = body.intent === "cinematic" ? "cinematic" : "performance";
-  const testObjective = body.testObjective === "Other" ? body.testObjectiveOther?.trim() : body.testObjective?.trim();
-  const preserveDetails = body.preserveDetails?.trim();
-  const audience = body.audience?.trim();
-  const proposition = body.proposition?.trim();
-  const platform = body.platform?.trim();
-  const visualTones = body.visualTones?.map((tone) => tone.trim()).filter(Boolean);
-  const selectedConcept = body.selectedConcept;
+  let step = 0;
+  const externalApiCall: ExternalApiCall = async (call) => {
+    const currentStep = ++step;
+    console.log(`STEP ${currentStep} start`);
+    const response = await call();
+    console.log(`STEP ${currentStep} done, bytes: ${jsonByteLength(response)}`);
+    return response;
+  };
+
+  const { brandProduct, runId, intent, testObjective: suppliedTestObjective, testObjectiveOther, preserveDetails, audience, proposition, platform, visualTones, selectedConcept } = body;
+  const testObjective = suppliedTestObjective === "Other" ? testObjectiveOther : suppliedTestObjective;
   const requestedQaCount = Number.isInteger(body.qaTargetShotCount) && body.qaTargetShotCount! >= 4 && body.qaTargetShotCount! <= 8 ? body.qaTargetShotCount : undefined;
   const qaTargetShotCount = requestedQaCount && process.env.FRAME_QA_TOKEN && request.headers.get("x-frame-qa-token") === process.env.FRAME_QA_TOKEN ? requestedQaCount : undefined;
 
-  if (!brandProduct || !audience || !proposition || !platform || !visualTones?.length) return NextResponse.json({ error: "Please complete the current creative brief." }, { status: 400 });
-  if (!platforms.includes(platform)) return NextResponse.json({ error: "Choose one of the available platforms." }, { status: 400 });
-  if (visualTones.length > 3 || visualTones.some((tone) => !visualToneOptions.includes(tone))) return NextResponse.json({ error: "Choose one to three available visual tones." }, { status: 400 });
-  if (!isConcept(selectedConcept)) return NextResponse.json({ error: "Choose a complete creative direction before generating the storyboard." }, { status: 400 });
-  if (!process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Add OPENAI_API_KEY before generating the storyboard." }, { status: 500 });
+  if (!platforms.includes(platform)) return loggedJson({ error: "Choose one of the available platforms." }, { status: 400 });
+  if (visualTones.length > 3 || visualTones.some((tone) => !visualToneOptions.includes(tone))) return loggedJson({ error: "Choose one to three available visual tones." }, { status: 400 });
+  if (!isConcept(selectedConcept)) return loggedJson({ error: "Choose a complete creative direction before generating the storyboard." }, { status: 400 });
+  if (!process.env.OPENAI_API_KEY) return loggedJson({ error: "Add OPENAI_API_KEY before generating the storyboard." }, { status: 500 });
 
   if (runId && process.env.NEXT_PUBLIC_CONVEX_URL) {
-    try { await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL).mutation(anyApi.runs.setStage, { id: runId, status: "storyboard_generating", step: "Building the storyboard" }); } catch (error) { console.warn("Run storyboard status could not be saved", error); }
+    try { await externalApiCall(() => new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!).mutation(anyApi.runs.setStage, { id: runId, status: "storyboard_generating", step: "Building the storyboard" })); } catch (error) { console.warn("Run storyboard status could not be saved", error); }
   }
 
   let generation: Generation | null;
-  try { generation = await makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount }); }
+  try { generation = await makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount, externalApiCall }); }
   catch (error) {
     console.error("OpenAI storyboard generation failed", error);
     const kind = classifyOpenAIError(error);
     if (runId && process.env.NEXT_PUBLIC_CONVEX_URL) {
-      try { await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard could not be built." }); } catch { /* Preserve the generation error response. */ }
+      try { await externalApiCall(() => new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard could not be built." })); } catch { /* Preserve the generation error response. */ }
     }
-    if (kind === "rate_limit") return NextResponse.json({ error: "We're receiving too many generation requests. Try again shortly." }, { status: 429 });
-    if (kind === "quota" || kind === "configuration") return NextResponse.json({ error: "Storyboard generation is not available for this project right now." }, { status: 503 });
-    return NextResponse.json({ error: "We couldn't build the storyboard. Try again." }, { status: 502 });
+    if (kind === "rate_limit") return loggedJson({ error: "We're receiving too many generation requests. Try again shortly." }, { status: 429 });
+    if (kind === "quota" || kind === "configuration") return loggedJson({ error: "Storyboard generation is not available for this project right now." }, { status: 503 });
+    return loggedJson({ error: "We couldn't build the storyboard. Try again." }, { status: 502 });
   }
   if (!generation) {
     if (runId && process.env.NEXT_PUBLIC_CONVEX_URL) {
-      try { await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard came back incomplete." }); } catch { /* Preserve the generation error response. */ }
+      try { await externalApiCall(() => new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard came back incomplete." })); } catch { /* Preserve the generation error response. */ }
     }
-    return NextResponse.json({ error: "The storyboard came back incomplete. Please generate it again." }, { status: 502 });
+    return loggedJson({ error: "The storyboard came back incomplete. Please generate it again." }, { status: 502 });
   }
 
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
   if (!convexUrl) {
     console.warn("Storyboard generated without persistence: NEXT_PUBLIC_CONVEX_URL is missing");
-    return NextResponse.json({ generation, saved: false });
+    return loggedJson({ generation, saved: false });
   }
   try {
     const client = new ConvexHttpClient(convexUrl);
-    const generationId = await client.mutation(anyApi.generations.save, { intent, testObjective: body.testObjective?.trim(), testObjectiveOther: body.testObjectiveOther?.trim(), preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) });
-    if (runId) await client.mutation(anyApi.runs.setStage, { id: runId, status: "images_generating", step: `Drawing frame 1 of ${generation.shots.length}`, currentCount: 0, totalCount: generation.shots.length, generationId });
-    return NextResponse.json({ generation, generationId, saved: true });
+    const generationId = await externalApiCall(() => client.mutation(anyApi.generations.save, { intent, testObjective: suppliedTestObjective, testObjectiveOther, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) }));
+    if (runId) await externalApiCall(() => client.mutation(anyApi.runs.setStage, { id: runId, status: "images_generating", step: `Drawing frame 1 of ${generation.shots.length}`, currentCount: 0, totalCount: generation.shots.length, generationId }));
+    return loggedJson({ generation, generationId, saved: true });
   } catch (error) {
     console.warn("Storyboard generated but Convex persistence failed", error);
-    return NextResponse.json({ generation, saved: false });
+    return loggedJson({ generation, saved: false });
   }
-}
+};
+
+export const POST = withJsonErrors(post);
+export const GET = methodNotAllowed(["POST"]);
+export const HEAD = methodNotAllowed(["POST"]);
+export const PUT = methodNotAllowed(["POST"]);
+export const PATCH = methodNotAllowed(["POST"]);
+export const DELETE = methodNotAllowed(["POST"]);
+export const OPTIONS = methodNotAllowed(["POST"]);
