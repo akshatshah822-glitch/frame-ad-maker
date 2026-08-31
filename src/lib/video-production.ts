@@ -1,6 +1,7 @@
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
 import type { VideoClip, VideoProduction } from "@/lib/types";
+import { readJsonResponse } from "@/lib/read-json-response";
 
 export function parseVideoProduction(record: Record<string, unknown>): VideoProduction {
   return {
@@ -28,7 +29,7 @@ export async function uploadMedia(bytes: Uint8Array, contentType: string) {
   const buffer = new ArrayBuffer(bytes.byteLength); new Uint8Array(buffer).set(bytes);
   const response = await fetch(uploadUrl, { method: "POST", headers: { "Content-Type": contentType }, body: new Blob([buffer], { type: contentType }) });
   if (!response.ok) throw new Error(`Media upload failed with ${response.status}`);
-  const { storageId } = await response.json() as { storageId: string };
+  const { storageId } = await readJsonResponse<{ storageId: string }>(response);
   const mediaUrl = await convex.query(anyApi.generations.getImageUrl, { storageId });
   if (!mediaUrl) throw new Error("Media URL was not created");
   return { storageId, mediaUrl };
