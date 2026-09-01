@@ -10,6 +10,13 @@ export function parseVideoProduction(record: Record<string, unknown>): VideoProd
     finalVideoStorageId: record.finalVideoStorageId ? String(record.finalVideoStorageId) : undefined, technicalQa: record.technicalQa ? String(record.technicalQa) : undefined,
     error: record.error ? String(record.error) : undefined, startedAt: Number(record.startedAt), updatedAt: Number(record.updatedAt),
     clipsReadyAt: record.clipsReadyAt ? Number(record.clipsReadyAt) : undefined, assemblyStartedAt: record.assemblyStartedAt ? Number(record.assemblyStartedAt) : undefined,
+    assemblyPosition: typeof record.assemblyPosition === "number" ? record.assemblyPosition : undefined,
+    assemblyStorageId: record.assemblyStorageId ? String(record.assemblyStorageId) : undefined,
+    assemblyUrl: record.assemblyUrl ? String(record.assemblyUrl) : undefined,
+    assemblyStepDurations: record.assemblyStepDurations ? JSON.parse(String(record.assemblyStepDurations)) as number[] : undefined,
+    assemblyNarration: record.assemblyNarration ? JSON.parse(String(record.assemblyNarration)) as string[] : undefined,
+    assemblyClaimPosition: typeof record.assemblyClaimPosition === "number" ? record.assemblyClaimPosition : undefined,
+    assemblyClaimedAt: typeof record.assemblyClaimedAt === "number" ? record.assemblyClaimedAt : undefined,
     finalReadyAt: record.finalReadyAt ? Number(record.finalReadyAt) : undefined, totalFinalCredits: typeof record.totalFinalCredits === "number" ? record.totalFinalCredits : undefined,
   };
 }

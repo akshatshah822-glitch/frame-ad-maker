@@ -4,14 +4,22 @@ import { anyApi } from "convex/server";
 import { RunwayVideoProvider, normalizeVideoError } from "@/lib/runway-provider";
 import { getVideoProduction, uploadMedia } from "@/lib/video-production";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
+import { advanceVideoAssembly, AssemblyProgressError } from "@/lib/video-assembly-progress";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const post = async (request: Request) => {
   const { generationId } = await request.json().catch(() => ({})) as { generationId?: string };
   if (!generationId) return NextResponse.json({ error: "A production ID is required." }, { status: 400 });
   const production = await getVideoProduction(generationId);
   if (!production) return NextResponse.json({ production: null });
+  if (production.status === "generating" && production.clips.every((item) => item.status === "complete") && (production.assemblyPosition ?? 0) > 0) {
+    try { return NextResponse.json({ production: (await advanceVideoAssembly(generationId)).production }); }
+    catch (error) {
+      if (error instanceof AssemblyProgressError) return NextResponse.json({ error: error.message, detail: error.detail }, { status: error.status });
+      throw error;
+    }
+  }
   if (["ready", "clips_ready", "assembling", "cancelled"].includes(production.status)) return NextResponse.json({ production });
   const activeClips = production.clips.filter((item) => (item.status === "submitted" || item.status === "running") && item.providerTaskId);
   const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);

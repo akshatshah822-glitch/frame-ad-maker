@@ -188,6 +188,13 @@ export type VideoProduction = {
   updatedAt: number;
   clipsReadyAt?: number;
   assemblyStartedAt?: number;
+  assemblyPosition?: number;
+  assemblyStorageId?: string;
+  assemblyUrl?: string;
+  assemblyStepDurations?: number[];
+  assemblyNarration?: string[];
+  assemblyClaimPosition?: number;
+  assemblyClaimedAt?: number;
   finalReadyAt?: number;
   totalFinalCredits?: number;
 };

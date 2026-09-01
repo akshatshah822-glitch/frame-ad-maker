@@ -40,6 +40,8 @@ export default defineSchema({
   videoProductions: defineTable({
     generationId: v.id("generations"), status: v.string(), provider: v.string(), model: v.string(), clips: v.string(),
     finalVideoStorageId: v.optional(v.id("_storage")), finalVideoUrl: v.optional(v.string()), technicalQa: v.optional(v.string()), error: v.optional(v.string()),
+    assemblyPosition: v.optional(v.number()), assemblyStorageId: v.optional(v.id("_storage")), assemblyUrl: v.optional(v.string()), assemblyStepDurations: v.optional(v.string()), assemblyNarration: v.optional(v.string()),
+    assemblyClaimPosition: v.optional(v.number()), assemblyClaimedAt: v.optional(v.number()),
     startedAt: v.number(), updatedAt: v.number(), clipsReadyAt: v.optional(v.number()), assemblyStartedAt: v.optional(v.number()), finalReadyAt: v.optional(v.number()), totalFinalCredits: v.optional(v.number()),
   }).index("by_generation", ["generationId"]).index("by_status", ["status"]),
 });
