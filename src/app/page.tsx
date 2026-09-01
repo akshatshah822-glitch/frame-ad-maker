@@ -5,6 +5,7 @@ import { TreatmentView } from "@/components/treatment-view";
 import type { AppPhase, Brief, Concept, Generation, Shot } from "@/lib/types";
 import { track } from "@/lib/analytics";
 import { readJsonResponse } from "@/lib/read-json-response";
+import { LandingFilmCarousel } from "@/components/landing-film-carousel";
 
 const conceptTypes = ["Human / Emotional", "Product / Craft-led", "Unexpected / Conceptual"] as const;
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"] as const;
@@ -440,7 +441,7 @@ export default function Home() {
     <header className="topbar landing-nav"><span className="wordmark">FRAME<span>{"///"}</span></span><nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#brief">Create an ad</a></nav><a className="nav-cta" href="#brief">Start with a brief <span>↗</span></a></header>
     <section className="launch-hero">
       <h1>Turn your brief into the film.</h1>
-      <video autoPlay muted loop playsInline preload="metadata" poster="/frame-launch-poster.jpg" aria-label="A finished advertisement created with FRAME"><source src="/frame-launch-ad.mp4" type="video/mp4" /></video>
+      <LandingFilmCarousel />
       <a className="launch-primary" href="#brief">Create an ad <span>↗</span></a>
       <div className="example-briefs" aria-label="Try an example brief">{exampleBriefs.map((example) => { const selected = form.brandProduct === example.brief.brandProduct; return <a key={example.label} data-selected={selected} aria-current={selected ? "true" : undefined} href={`/?example=${example.slug}#brief`}>{example.label}</a>; })}</div>
     </section>
