@@ -48,10 +48,11 @@ export async function assembleVideo(treatment: TreatmentData, production: VideoP
     }
     normalized.push(output);
   }
-  const concatFile = join(directory, "concat.txt");
-  await writeFile(concatFile, normalized.map((path) => `file '${path.replace(/'/g, "'\\''")}'`).join("\n"));
   const picture = join(directory, "picture.mp4");
-  await runFfmpeg(["-f", "concat", "-safe", "0", "-i", concatFile, "-c", "copy", picture]);
+  const pictureInputs = normalized.flatMap((path) => ["-i", path]);
+  const uniformClips = normalized.map((_, index) => `[${index}:v]scale=${config.width}:${config.height}:force_original_aspect_ratio=increase,crop=${config.width}:${config.height},fps=24,format=yuv420p,setsar=1,setpts=PTS-STARTPTS[join${index}]`);
+  const joinedClips = normalized.map((_, index) => `[join${index}]`).join("");
+  await runFfmpeg([...pictureInputs, "-filter_complex", `${uniformClips.join(";")};${joinedClips}concat=n=${normalized.length}:v=1:a=0,format=yuv420p[joined]`, "-map", "[joined]", "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", picture]);
 
   const voiceSegments = await generateVoiceSegments(treatment.generation.shots, treatment.brief, narration);
   const voicePaths: Array<{ path: string; delay: number }> = [];
