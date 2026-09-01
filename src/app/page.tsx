@@ -34,6 +34,9 @@ const exampleBriefs: Array<{ slug: string; label: string; brief: Brief }> = [
 
 export default function Home() {
   const [form, setForm] = useState(initialForm);
+  const [briefTopic, setBriefTopic] = useState("");
+  const [briefGenerating, setBriefGenerating] = useState(false);
+  const [briefGenerationError, setBriefGenerationError] = useState("");
   const [generation, setGeneration] = useState<Generation | null>(null);
   const [concepts, setConcepts] = useState<Concept[] | null>(null);
   const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
@@ -183,6 +186,30 @@ export default function Home() {
       if (current.visualTones.length === 3) return current;
       return { ...current, visualTones: [...current.visualTones, tone] };
     });
+  }
+
+  async function generateBriefFromTopic() {
+    const topic = briefTopic.trim();
+    if (!topic || briefGenerating) return;
+    setBriefGenerating(true);
+    setBriefGenerationError("");
+    try {
+      const response = await fetch("/api/brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const result = await readJsonResponse<{ brief?: Brief; error?: string }>(response);
+      if (!response.ok || !result.brief) throw new Error(result.error || "The brief could not be generated.");
+      setForm({ ...result.brief, visualTones: [...result.brief.visualTones] });
+      setError("");
+      window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("#brief textarea")?.focus({ preventScroll: true }));
+    } catch (reason) {
+      setBriefGenerationError(reason instanceof Error ? reason.message : "The brief could not be generated.");
+    } finally {
+      setBriefGenerating(false);
+    }
   }
 
   async function requestConcepts() {
@@ -466,6 +493,11 @@ export default function Home() {
       <div className="brief-intro"><p className="eyebrow">Start here</p><h2>Your brief<br />becomes the treatment.</h2><p>No production language needed. Give FRAME the decisions only you can make.</p><div className="brief-promise"><span>YOU BRING</span><strong>Product · audience · one message</strong><span>FRAME BUILDS</span><strong>Idea · direction · storyboard · frames</strong></div></div>
       <form className="brief-card" id="brief" onSubmit={generateConcepts} onFocus={() => { if (!briefStartedRef.current) { briefStartedRef.current = true; track("brief_started"); } }}>
         <div className="section-label"><span>BR</span><h2>Creative brief</h2><em>Focused brief</em></div>
+        <section className="brief-generator" aria-labelledby="brief-generator-title">
+          <div><small>Start with one line</small><h3 id="brief-generator-title">What should the film be about?</h3><p>FRAME will draft the complete brief below. Every field stays editable.</p></div>
+          <div className="brief-generator-control"><input type="text" maxLength={240} value={briefTopic} onChange={(event) => setBriefTopic(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void generateBriefFromTopic(); } }} placeholder="e.g. the revolt of 1857" aria-label="Topic or product idea" disabled={briefGenerating} /><button type="button" onClick={() => void generateBriefFromTopic()} disabled={briefGenerating || briefTopic.trim().length < 3}>{briefGenerating ? "Drafting brief…" : "Generate brief"}<span aria-hidden="true">↘</span></button></div>
+          {briefGenerationError ? <p className="brief-generator-error" role="alert">{briefGenerationError}</p> : <small className="brief-generator-status" aria-live="polite">{briefGenerating ? "Turning your idea into the existing brief fields…" : "Or fill in the brief yourself below."}</small>}
+        </section>
         <section className="intent-step"><small>What do you want to create?</small><div className="intent-choices" role="group" aria-label="What do you want to create?"> <button className="intent-choice" type="button" aria-pressed={form.intent === "performance"} onClick={() => setForm({ ...form, intent: "performance" })}><strong>Performance ad</strong><span>Create around a hook, pitch, proof or offer you want to test.</span></button><button className="intent-choice" type="button" aria-pressed={form.intent === "cinematic"} onClick={() => setForm({ ...form, intent: "cinematic" })}><strong>Cinematic story</strong><span>Turn an idea into a visual story, scene by scene.</span></button></div></section>
         <section className="brief-step"><div className="step-heading"><b>01</b><div><small>{form.intent === "performance" ? "Brand / Product" : "Story / Subject"}</small><h3>{form.intent === "performance" ? "What are we advertising?" : "What's the story about?"}</h3></div></div><textarea required value={form.brandProduct} onChange={(event) => setForm({ ...form, brandProduct: event.target.value })} rows={2} placeholder={form.intent === "performance" ? "e.g. A protein snack for busy workdays" : "e.g. A working SSC aspirant studies after everyone sleeps"} aria-label={form.intent === "performance" ? "What are we advertising?" : "What's the story about?"} /></section>
         <section className="brief-step"><div className="step-heading"><b>02</b><div><small>Audience</small><h3>{form.intent === "performance" ? "Who specifically needs to care?" : "Who is this for?"}</h3></div></div><textarea required maxLength={160} rows={2} value={form.audience} onChange={(event) => setForm({ ...form, audience: event.target.value })} placeholder="Be specific about the person" aria-label={form.intent === "performance" ? "Who specifically needs to care?" : "Who is this for?"} /></section>
