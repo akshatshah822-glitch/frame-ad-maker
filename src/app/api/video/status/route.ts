@@ -13,7 +13,9 @@ const post = async (request: Request) => {
   if (!generationId) return NextResponse.json({ error: "A production ID is required." }, { status: 400 });
   const production = await getVideoProduction(generationId);
   if (!production) return NextResponse.json({ production: null });
-  if (production.status === "generating" && production.clips.every((item) => item.status === "complete") && (production.assemblyPosition ?? 0) > 0) {
+  const allClipsComplete = production.clips.length > 0 && production.clips.every((item) => item.status === "complete");
+  const assemblyPosition = production.assemblyPosition ?? 0;
+  if (production.status === "generating" && allClipsComplete && assemblyPosition > 0) {
     try { return NextResponse.json({ production: (await advanceVideoAssembly(generationId)).production }); }
     catch (error) {
       if (error instanceof AssemblyProgressError) return NextResponse.json({ error: error.message, detail: error.detail }, { status: error.status });
@@ -21,8 +23,12 @@ const post = async (request: Request) => {
     }
   }
   if (["ready", "clips_ready", "assembling", "cancelled"].includes(production.status)) return NextResponse.json({ production });
-  const activeClips = production.clips.filter((item) => (item.status === "submitted" || item.status === "running") && item.providerTaskId);
   const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  if (production.status === "generating" && allClipsComplete) {
+    await convex.mutation(anyApi.videoProductions.markClipsReady, { id: production.id, totalFinalCredits: production.clips.reduce((sum, item) => sum + (item.finalCredits ?? 0), 0) });
+    return NextResponse.json({ production: await getVideoProduction(generationId) });
+  }
+  const activeClips = production.clips.filter((item) => (item.status === "submitted" || item.status === "running") && item.providerTaskId);
   if (!activeClips.length) {
     if (!production.clips.some((item) => ["waiting", "submitted", "running"].includes(item.status)) && production.clips.some((item) => item.status === "failed")) {
       await convex.mutation(anyApi.videoProductions.setStatus, { id: production.id, status: "partial_failure", error: "One or more shots could not be animated." });
