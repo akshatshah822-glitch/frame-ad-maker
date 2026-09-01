@@ -2,7 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
 export const save = mutation({
-  args: { intent: v.optional(v.string()), testObjective: v.optional(v.string()), testObjectiveOther: v.optional(v.string()), preserveDetails: v.optional(v.string()), brandProduct: v.string(), audience: v.string(), proposition: v.string(), platform: v.string(), visualTones: v.array(v.string()), selectedConcept: v.string(), brandBible: v.optional(v.string()), creativeGrammar: v.optional(v.string()), visualBible: v.string(), title: v.string(), shotList: v.string() },
+  args: { intent: v.optional(v.string()), testObjective: v.optional(v.string()), testObjectiveOther: v.optional(v.string()), preserveDetails: v.optional(v.string()), brandProduct: v.string(), audience: v.string(), proposition: v.string(), platform: v.string(), visualTones: v.array(v.string()), selectedConcept: v.string(), brandBible: v.optional(v.string()), creativeGrammar: v.optional(v.string()), visualBible: v.string(), title: v.string(), script: v.optional(v.string()), shotList: v.string() },
   handler: async (ctx, args) => ctx.db.insert("generations", { ...args, createdAt: Date.now() }),
 });
 
@@ -19,6 +19,18 @@ export const getImageUrl = query({
 export const getById = query({
   args: { id: v.id("generations") },
   handler: async (ctx, { id }) => ctx.db.get(id),
+});
+
+export const saveScript = mutation({
+  args: { generationId: v.id("generations"), script: v.string() },
+  handler: async (ctx, { generationId, script }) => {
+    const generation = await ctx.db.get(generationId);
+    if (!generation) return false;
+    const savedScript = script.trim();
+    if (!savedScript) throw new Error("A voiceover script is required.");
+    await ctx.db.patch(generationId, { script: savedScript });
+    return true;
+  },
 });
 
 export const attachIdentityReferences = mutation({

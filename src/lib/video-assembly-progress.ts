@@ -25,7 +25,7 @@ export async function advanceVideoAssembly(generationId: string, options: { forc
   try {
     const claimedProduction = await getVideoProduction(generationId);
     if (!claimedProduction) throw new Error("The claimed production could not be loaded.");
-    const result = await assembleVideoStep(treatment, claimedProduction, position, claimedProduction.assemblyNarration ?? options.narration);
+    const result = await assembleVideoStep(treatment, claimedProduction, position);
     const asset = await uploadMedia(result.bytes, "video/mp4");
     if (result.qa) {
       const attached = await convex.mutation(anyApi.generations.attachFinalVideo, { generationId, finalVideoStorageId: asset.storageId, finalVideoUrl: asset.mediaUrl });

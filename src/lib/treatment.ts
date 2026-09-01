@@ -67,7 +67,15 @@ export function parseStoredTreatment(record: Record<string, unknown>): Treatment
         preserveDetails: record.preserveDetails ? String(record.preserveDetails) : undefined,
       },
       concept,
-      generation: { title: String(record.title ?? concept.conceptName), duration: "30 seconds", brandBible, creativeGrammar, visualBible, shots },
+      generation: {
+        title: String(record.title ?? concept.conceptName),
+        duration: "30 seconds",
+        script: String(record.script ?? "").trim() || undefined,
+        brandBible,
+        creativeGrammar,
+        visualBible,
+        shots,
+      },
     };
   } catch {
     return null;

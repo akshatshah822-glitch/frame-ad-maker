@@ -144,6 +144,7 @@ export type Shot = {
 export type Generation = {
   title: string;
   duration: string;
+  script?: string;
   visualBible: VisualBible;
   brandBible?: BrandBible;
   creativeGrammar?: CreativeGrammar;
