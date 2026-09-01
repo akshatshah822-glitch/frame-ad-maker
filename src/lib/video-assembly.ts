@@ -3,7 +3,6 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { path as ffprobePath } from "ffprobe-static";
 import type { TreatmentData, VideoProduction } from "@/lib/types";
 import { generateNarrationTrack } from "@/lib/voice";
 import { getVideoConfig } from "@/lib/video-config";
@@ -18,8 +17,10 @@ async function runFfmpeg(args: string[]) {
 }
 
 async function probeDuration(path: string) {
-  const { stdout } = await exec(ffprobePath, ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path], { maxBuffer: 100_000 });
-  const duration = Number(stdout.trim());
+  const executable = join(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg");
+  const { stderr } = await exec(executable, ["-hide_banner", "-i", path, "-f", "null", "-"], { maxBuffer: 1_000_000 });
+  const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  const duration = match ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : 0;
   if (!Number.isFinite(duration) || duration <= 0) throw new Error("The generated narration has no readable duration.");
   return duration;
 }
