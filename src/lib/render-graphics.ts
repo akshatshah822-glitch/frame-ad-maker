@@ -24,12 +24,15 @@ function textPath(font: Font, value: string, x: number, y: number, size: number,
 }
 
 function lines(value: string, maximum = 34, maximumLines?: number) {
-  const words = value.trim().split(/\s+/);
   const output: string[] = [];
-  for (const word of words) {
-    const current = output.at(-1);
-    if (!current || `${current} ${word}`.length > maximum) output.push(word);
-    else output[output.length - 1] = `${current} ${word}`;
+  for (const explicitLine of value.trim().split(/\s*(?:\n|\|)\s*/)) {
+    const wrapped: string[] = [];
+    for (const word of explicitLine.split(/\s+/)) {
+      const current = wrapped.at(-1);
+      if (!current || `${current} ${word}`.length > maximum) wrapped.push(word);
+      else wrapped[wrapped.length - 1] = `${current} ${word}`;
+    }
+    output.push(...wrapped);
   }
   return maximumLines ? output.slice(0, maximumLines) : output;
 }

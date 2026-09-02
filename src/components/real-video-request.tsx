@@ -31,16 +31,17 @@ export function RealVideoRequest({ storyboardId }: Props) {
   }
 
   if (!storyboardId) return null;
-  if (status === "confirmed") return <div className="real-video-confirmation" role="status"><strong>REQUEST RECEIVED</strong><span>We’ll email you about your 24-hour video delivery.</span></div>;
+  if (status === "confirmed") return <div className="real-video-confirmation" role="status"><strong>REQUEST RECEIVED</strong><span>We’ll email you about your finished film delivery within 24 hours.</span></div>;
 
   return <div className="real-video-request">
-    <button className="real-video-cta" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Get this as a real video, ₹200, delivered in 24h</button>
-    <p className="real-video-helper">Paid delivery adds a human-reviewed edit, polished sound, and a delivery-ready master within 24 hours.</p>
+    <button className="real-video-cta" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Get a finished film for ₹200, delivered in 24h</button>
+    <p className="real-video-helper">₹200 delivers a human-reviewed edit, polished sound, and a delivery-ready MP4 within 24 hours.</p>
+    <p className="real-video-helper">Nothing starts until you submit the request.</p>
     {open ? <form onSubmit={submit}>
       <label>Email<input name="email" type="email" autoComplete="email" required placeholder="you@company.com" /></label>
       <label>Brand name<input name="brandName" type="text" autoComplete="organization" required placeholder="Your brand" /></label>
       <label>Storyboard ID<input name="storyboardId" type="text" readOnly value={storyboardId} /></label>
-      <button className="video-primary" type="submit" disabled={status === "saving"}>{status === "saving" ? "SAVING…" : "REQUEST REAL VIDEO"}</button>
+      <button className="video-primary" type="submit" disabled={status === "saving"}>{status === "saving" ? "SAVING…" : "REQUEST FINISHED FILM"}</button>
       {error ? <p role="alert">{error}</p> : null}
     </form> : null}
   </div>;

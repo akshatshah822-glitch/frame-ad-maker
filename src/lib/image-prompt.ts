@@ -27,9 +27,10 @@ const platformImages: Record<string, { promptRatio: string; apiSize: string }> =
 
 export const supportedPlatforms = Object.keys(platformImages);
 const PERSON_DESCRIPTOR = /\b(body|appearance|age|aged|young|old|clothing|clothes|wardrobe|outfit|dress|shirt|blouse|sari|saree|skin|complexion|hair|hairstyle|ethnicity|race|racial|physique|figure|build|chest|legs?|bare|attractive|beautiful|handsome)\b/i;
+const READABLE_TEXT_DIRECTION = /\b(?:caption|copy|label|logo|numeral|number|text|type|typography|wording|words?)\b/i;
 
 function safeDirection(value: string, fallback: string) {
-  const safeParts = value.split(/(?<=[.!?;])\s+|\n+/).filter((part) => !PERSON_DESCRIPTOR.test(part));
+  const safeParts = value.split(/(?<=[.!?;])\s+|\n+/).filter((part) => !PERSON_DESCRIPTOR.test(part) && !READABLE_TEXT_DIRECTION.test(part));
   return safeParts.join(" ").trim() || fallback;
 }
 

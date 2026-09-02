@@ -77,9 +77,9 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   const cancel = async () => { setWorking(true); try { await call("/api/video/cancel", { generationId }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Production could not be cancelled."); } finally { setWorking(false); } };
 
   if (!production) return <section className="video-gate" aria-labelledby="video-gate-title" aria-live="polite">
-    <p className="eyebrow">Film production</p><h2 id="video-gate-title">Storyboard complete</h2>
-    <p>{statusChecked ? "Your six frames are ready. Start film production when you’re ready." : "Checking for an existing render…"}</p>
-    {statusChecked ? <div className="video-start-action"><button className="video-primary" type="button" onClick={start} disabled={working}>{working ? "Starting film…" : "Start film"}</button><span>Starts the six film shots</span></div> : null}
+    <p className="eyebrow">AI animatic preview</p><h2 id="video-gate-title">Storyboard complete</h2>
+    <p>{statusChecked ? "Your six frames are ready. Start the AI animatic preview when you’re ready." : "Checking for an existing preview…"}</p>
+    {statusChecked ? <div className="video-start-action"><button className="video-primary" type="button" onClick={start} disabled={working}>{working ? "Starting preview…" : "Start AI animatic preview"}</button><span>Starts the six preview shots</span></div> : null}
     {error ? <p className="video-error" role="alert">{error}</p> : null}
   </section>;
 
@@ -98,16 +98,16 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
     : production.status === "clips_ready" ? 88
     : Math.round(4 + clipProgress * 82);
   if (production.status === "ready" && production.finalVideoUrl) return <section className="final-ad" aria-labelledby="final-ad-title">
-    <p className="eyebrow">AI preview</p><h2 id="final-ad-title">Your AI preview is ready.</h2>
+    <p className="eyebrow">AI animatic preview</p><h2 id="final-ad-title">Your AI animatic preview is ready.</h2>
     <video ref={videoRef} controls playsInline preload="metadata" poster={posterUrl} src={production.finalVideoUrl} onPlay={() => { setIsPlaying(true); if (!filmShown.current) { filmShown.current = true; track("film_shown", { treatmentId: generationId }); } }} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)}>Your browser cannot play this video.</video>
-    <div className="final-ad-actions"><button className="video-primary" type="button" aria-label={isPlaying ? "Pause AI preview" : "Play AI preview"} onClick={() => { const video = videoRef.current; if (!video) return; if (video.paused) void video.play(); else video.pause(); }}>{isPlaying ? "Pause" : "Play"}</button><a className="export-button" href={`/api/video/download/${generationId}`} download>{treatmentTitle ? `Download ${treatmentTitle} AI preview` : "Download AI preview"}</a></div>
+    <div className="final-ad-actions"><button className="video-primary" type="button" aria-label={isPlaying ? "Pause AI animatic preview" : "Play AI animatic preview"} onClick={() => { const video = videoRef.current; if (!video) return; if (video.paused) void video.play(); else video.pause(); }}>{isPlaying ? "Pause" : "Play"}</button><a className="export-button" href={`/api/video/download/${generationId}`} download>{treatmentTitle ? `Download ${treatmentTitle} AI animatic preview` : "Download AI animatic preview"}</a></div>
   </section>;
 
   return <section className="video-progress" aria-live="polite" aria-busy={["creating", "generating", "assembling"].includes(production.status)}>
-    <p className="eyebrow">Film production</p>
+    <p className="eyebrow">AI animatic preview</p>
     <h2>{production.status === "assembling" ? "Stitching 6 of 6" : production.status === "cancelled" ? "Production paused" : `Rendering ${complete} of 6`}</h2>
     <p>{production.status === "assembling" ? "Normalizing the clips, laying in audio, and finishing the brand frame." : `${complete} of 6 clips are safely stored.`}</p>
-    <div className="production-progress" role="progressbar" aria-label="Film production progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+    <div className="production-progress" role="progressbar" aria-label="AI animatic preview production progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
       <div className="production-progress-meta"><span>Overall production</span><strong>{progress}%</strong></div>
       <span className="production-progress-track"><i style={{ width: `${progress}%` }} /></span>
     </div>

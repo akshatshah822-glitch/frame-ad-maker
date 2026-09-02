@@ -9,6 +9,7 @@ import { findUnsupportedProof, neutralizeUnsupportedProof, proofSafetyInstructio
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 import { generateVoiceoverScript } from "@/lib/voiceover-script";
 import { cameraDirectionError } from "@/lib/camera-direction";
+import { findDuplicateWordIssue } from "@/lib/treatment-copy-quality";
 
 type StoryboardBrief = { intent?: string; testObjective?: string; testObjectiveOther?: string; preserveDetails?: string; brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown; qaTargetShotCount?: number; runId?: string | number };
 type ModelShot = Omit<Shot, "imagePrompt" | "imageStatus" | "imageUrl" | "imageStorageId" | "imageError">;
@@ -153,7 +154,7 @@ function parseGeneration(outputText: string): ModelGeneration | null {
     if (!structurallyValid) return null;
     const boundaries = [0, 4, 10, 14, 20, 26, 30];
     const shots = parsed.shots.map((shot, index) => ({ ...shot, shotNumber: index + 1, startTime: boundaries[index], endTime: boundaries[index + 1] }));
-    return {
+    const generation = {
       title: parsed.title.trim() || "Directed 30-second treatment",
       duration: parsed.duration.trim() || "30 seconds",
       brandBible: parsed.brandBible,
@@ -161,6 +162,8 @@ function parseGeneration(outputText: string): ModelGeneration | null {
       visualBible: parsed.visualBible,
       shots,
     } as ModelGeneration;
+    if (findDuplicateWordIssue(generation as Generation)) return null;
+    return generation;
   } catch {
     return null;
   }
@@ -217,6 +220,7 @@ CONTINUITY RULES
 - Keep the approved concept fixed. Do not replace it with a new idea.
 - Make the single-minded proposition impossible to miss through visual storytelling.
 - Keep voiceover or dialogue natural and deliverable within each shot's timing.
+- Write clean reader-facing treatment copy. Never repeat a word accidentally, including repeats joined by a conjunction such as "rhythmic and rhythmic".
 - Adapt framing and composition to the selected platform.
 
 VISUAL BIBLE
@@ -346,6 +350,10 @@ const post = async (request: Request) => {
       try { await externalApiCall(() => new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard came back incomplete." })); } catch { /* Preserve the generation error response. */ }
     }
     return loggedJson({ error: "The storyboard came back incomplete. Please generate it again." }, { status: 502 });
+  }
+  const duplicateCopy = findDuplicateWordIssue(generation, selectedConcept);
+  if (duplicateCopy) {
+    return loggedJson({ error: `The treatment copy repeats "${duplicateCopy.word}" in ${duplicateCopy.field}. Please revise the creative direction before publishing.` }, { status: 422 });
   }
 
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
