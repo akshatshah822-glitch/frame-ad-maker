@@ -1,10 +1,37 @@
 import { execFile } from "node:child_process";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { join } from "node:path";
+import sharp from "sharp";
+import { createOnScreenTextOverlay } from "@/lib/render-graphics";
 
 const exec = promisify(execFile);
 
-export type TechnicalQa = { duration: number; width: number; height: number; fps: number; videoCodec: string; pixelFormat: string; audioCodec: string; audioSampleRate: number; passed: boolean };
+export type OnScreenTextCheck = { shotNumber: number; expected: string; found: string; passed: boolean };
+export type TechnicalQa = { duration: number; width: number; height: number; fps: number; videoCodec: string; pixelFormat: string; audioCodec: string; audioSampleRate: number; onScreenTextChecks?: OnScreenTextCheck[]; passed: boolean };
+
+export async function verifyOnScreenText(path: string, expected: Array<{ shotNumber: number; text: string; timestamp: number }>, size: { width: number; height: number }) {
+  const executable = join(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg");
+  const directory = await mkdtemp(join(tmpdir(), "frame-text-qa-"));
+  const checks: OnScreenTextCheck[] = [];
+  for (const item of expected) {
+    const framePath = join(directory, `shot-${item.shotNumber}.png`);
+    await exec(executable, ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(item.timestamp), "-i", path, "-frames:v", "1", framePath], { maxBuffer: 1_000_000 });
+    const expectedPixels = await sharp(await createOnScreenTextOverlay(size.width, size.height, item.text)).ensureAlpha().raw().toBuffer();
+    const framePixels = await sharp(framePath).resize(size.width, size.height, { fit: "fill" }).ensureAlpha().raw().toBuffer();
+    let difference = 0;
+    let samples = 0;
+    for (let index = 0; index < expectedPixels.length; index += 4) {
+      if (expectedPixels[index + 3] < 250) continue;
+      difference += Math.abs(expectedPixels[index] - framePixels[index]) + Math.abs(expectedPixels[index + 1] - framePixels[index + 1]) + Math.abs(expectedPixels[index + 2] - framePixels[index + 2]);
+      samples += 3;
+    }
+    const passed = samples > 0 && difference / samples < 42;
+    checks.push({ shotNumber: item.shotNumber, expected: item.text, found: passed ? item.text : "", passed });
+  }
+  return checks;
+}
 
 export async function probeFinalVideo(path: string, expected: { width: number; height: number; duration: number }): Promise<TechnicalQa> {
   const executable = join(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg");

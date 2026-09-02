@@ -5,6 +5,8 @@ import { RunwayVideoProvider, normalizeVideoError } from "@/lib/runway-provider"
 import { getVideoProduction, uploadMedia } from "@/lib/video-production";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 import { advanceVideoAssembly, AssemblyProgressError } from "@/lib/video-assembly-progress";
+import { getTreatmentById } from "@/lib/treatment-data";
+import { ensureVoiceoverScript } from "@/lib/voiceover-script";
 
 export const maxDuration = 300;
 
@@ -15,6 +17,11 @@ const post = async (request: Request) => {
   if (!production) return NextResponse.json({ production: null });
   const allClipsComplete = production.clips.length > 0 && production.clips.every((item) => item.status === "complete");
   const assemblyPosition = production.assemblyPosition ?? 0;
+  if (allClipsComplete) {
+    const treatment = await getTreatmentById(generationId);
+    if (!treatment) return NextResponse.json({ error: "Treatment not found." }, { status: 404 });
+    await ensureVoiceoverScript(generationId, treatment, production.clips);
+  }
   if (production.status === "generating" && allClipsComplete && assemblyPosition > 0) {
     try { return NextResponse.json({ production: (await advanceVideoAssembly(generationId)).production }); }
     catch (error) {

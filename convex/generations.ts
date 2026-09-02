@@ -33,6 +33,32 @@ export const saveScript = mutation({
   },
 });
 
+export const repairPublishedTreatment = mutation({
+  args: {
+    generationId: v.id("generations"),
+    selectedConcept: v.string(),
+    visualBible: v.string(),
+    shotList: v.string(),
+  },
+  handler: async (ctx, { generationId, selectedConcept, visualBible, shotList }) => {
+    const generation = await ctx.db.get(generationId);
+    if (!generation) return false;
+    const currentShots = JSON.parse(generation.shotList) as Array<Record<string, unknown>>;
+    const repairedShots = JSON.parse(shotList) as Array<Record<string, unknown>>;
+    if (currentShots.length !== repairedShots.length || currentShots.some((shot, index) => {
+      const repaired = repairedShots[index];
+      return shot.shotNumber !== repaired?.shotNumber
+        || shot.imageUrl !== repaired.imageUrl
+        || shot.imageStorageId !== repaired.imageStorageId
+        || shot.imageStatus !== repaired.imageStatus;
+    })) throw new Error("Treatment repair cannot change saved image assets or shot order.");
+    JSON.parse(selectedConcept);
+    JSON.parse(visualBible);
+    await ctx.db.patch(generationId, { selectedConcept, visualBible, shotList });
+    return true;
+  },
+});
+
 export const attachIdentityReferences = mutation({
   args: {
     generationId: v.id("generations"),

@@ -15,6 +15,14 @@ function flattenStrings(value: unknown): string[] {
   return [];
 }
 
+function flattenClaimStrings(value: unknown, key = ""): string[] {
+  if (/^(?:cameraMovement|cameraMotion|displayCamera)$/.test(key)) return [];
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap((item) => flattenClaimStrings(item, key));
+  if (value && typeof value === "object") return Object.entries(value as Record<string, unknown>).flatMap(([childKey, item]) => flattenClaimStrings(item, childKey));
+  return [];
+}
+
 export function findUnsupportedProof(value: unknown, suppliedSource: string) {
   const output = flattenStrings(value).join("\n");
   const issues: string[] = proofSignals
@@ -22,7 +30,8 @@ export function findUnsupportedProof(value: unknown, suppliedSource: string) {
     .map(({ label }) => label);
 
   const suppliedNumbers = new Set(suppliedSource.match(/\b\d+(?:\.\d+)?%/g) ?? []);
-  const unsupportedNumbers = (output.match(/\b\d+(?:\.\d+)?%/g) ?? []).filter((value) => !suppliedNumbers.has(value));
+  const claimOutput = flattenClaimStrings(value).join("\n");
+  const unsupportedNumbers = (claimOutput.match(/\b\d+(?:\.\d+)?%/g) ?? []).filter((value) => !suppliedNumbers.has(value));
   if (unsupportedNumbers.length) issues.push("unsupported percentage or performance number");
   return [...new Set(issues)];
 }
@@ -37,19 +46,19 @@ const neutralProofReplacements: Array<{ pattern: RegExp; replacement: string; so
   { pattern: /\b(?:guaranteed results?|instant results?|immediate visible (?:result|improvement|glow)|works instantly)\b/gi, replacement: "an observable application moment", source: /\b(?:guaranteed|instant|immediate)\b/i },
 ];
 
-export function neutralizeUnsupportedProof<T>(value: T, suppliedSource: string): T {
+export function neutralizeUnsupportedProof<T>(value: T, suppliedSource: string, key = ""): T {
   if (typeof value === "string") {
     let safe: string = value;
     for (const item of neutralProofReplacements) {
       if (!item.source.test(suppliedSource)) safe = safe.replace(item.pattern, item.replacement);
     }
     const suppliedNumbers = new Set(suppliedSource.match(/\b\d+(?:\.\d+)?%/g) ?? []);
-    safe = safe.replace(/\b\d+(?:\.\d+)?%/g, (number) => suppliedNumbers.has(number) ? number : "a clearly observable amount");
+    if (!/^(?:cameraMovement|cameraMotion|displayCamera)$/.test(key)) safe = safe.replace(/\b\d+(?:\.\d+)?%/g, (number) => suppliedNumbers.has(number) ? number : "an observable change");
     return safe as T;
   }
-  if (Array.isArray(value)) return value.map((item) => neutralizeUnsupportedProof(item, suppliedSource)) as T;
+  if (Array.isArray(value)) return value.map((item) => neutralizeUnsupportedProof(item, suppliedSource, key)) as T;
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, neutralizeUnsupportedProof(item, suppliedSource)])) as T;
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, item]) => [childKey, neutralizeUnsupportedProof(item, suppliedSource, childKey)])) as T;
   }
   return value;
 }

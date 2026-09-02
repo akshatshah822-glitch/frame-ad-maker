@@ -3,10 +3,13 @@ import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
 import OpenAI from "openai";
 import { buildImagePrompt } from "@/lib/image-prompt";
-import type { BrandBible, Concept, CreativeGrammar, Generation, Shot, VisualBible } from "@/lib/types";
+import type { BrandBible, Concept, CreativeGrammar, Generation, Shot, TreatmentData, VisualBible } from "@/lib/types";
 import { classifyOpenAIError } from "@/lib/openai-error";
 import { findUnsupportedProof, neutralizeUnsupportedProof, proofSafetyInstruction } from "@/lib/proof-safety";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
+import { generateVoiceoverScript } from "@/lib/voiceover-script";
+import { cameraDirectionError } from "@/lib/camera-direction";
+import { findDuplicateWordIssue } from "@/lib/treatment-copy-quality";
 
 type StoryboardBrief = { intent?: string; testObjective?: string; testObjectiveOther?: string; preserveDetails?: string; brandProduct?: string; audience?: string; proposition?: string; platform?: string; visualTones?: string[]; selectedConcept?: unknown; qaTargetShotCount?: number; runId?: string | number };
 type ModelShot = Omit<Shot, "imagePrompt" | "imageStatus" | "imageUrl" | "imageStorageId" | "imageError">;
@@ -17,7 +20,7 @@ type ValidatedStoryboardBrief = Required<Pick<StoryboardBrief, "brandProduct" | 
 const platforms = ["Instagram / Reels", "Meta Ads", "YouTube", "TV / OTT"];
 const visualToneOptions = ["Cinematic", "Luxury", "Raw", "Playful", "Emotional", "Bold", "Minimal", "Surreal"];
 const conceptFields = ["conceptName", "idea", "hook", "story", "productRole", "visualWorld", "ending"] as const;
-const stringShotFields = ["narrativeBeat", "purpose", "displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "productAction", "performanceDirection", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "focusBehaviour", "lighting", "audio", "audioIntent", "voiceoverOrDialogue", "copyOrDialogue", "productPresence", "locationAndProps", "transitionIntent"] as const;
+const stringShotFields = ["narrativeBeat", "purpose", "displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "productAction", "performanceDirection", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "focusBehaviour", "lighting", "audio", "audioIntent", "voiceoverOrDialogue", "copyOrDialogue", "on_screen_text", "productPresence", "locationAndProps", "transitionIntent"] as const;
 const requiredShotContentFields = ["displayVisual", "displayCamera", "displayAction", "visualDescription", "subjectAction", "cameraFraming", "cameraAngle", "lensSuggestion", "cameraMovement", "lighting", "audio", "productPresence", "locationAndProps"] as const;
 const visualBibleStringFields = ["subject", "product", "location", "lighting", "cinematography", "texture"] as const;
 const brandBibleStringFields = ["brandName", "category", "product", "audience", "singleMindedProposition", "reasonToBelieve", "toneOfVoice", "visualLanguage"] as const;
@@ -110,7 +113,7 @@ const outputSchema = {
           displayVisual: { type: "string" }, displayCamera: { type: "string" }, displayAction: { type: "string" },
           visualDescription: { type: "string" }, subjectAction: { type: "string" }, cameraFraming: { type: "string" },
           cameraAngle: { type: "string" }, lensSuggestion: { type: "string" }, cameraMovement: { type: "string" },
-          lighting: { type: "string" }, audio: { type: "string" }, voiceoverOrDialogue: { type: "string" },
+          lighting: { type: "string" }, audio: { type: "string" }, voiceoverOrDialogue: { type: "string" }, on_screen_text: { type: "string" },
           productPresence: { type: "string" }, locationAndProps: { type: "string" }, productAction: { type: "string" }, performanceDirection: { type: "string" }, focusBehaviour: { type: "string" }, copyOrDialogue: { type: "string" }, audioIntent: { type: "string" }, transitionIntent: { type: "string" },
           motionDirection: {
             type: "object", additionalProperties: false, required: [...motionFields, "motionIntensity"],
@@ -143,12 +146,15 @@ function parseGeneration(outputText: string): ModelGeneration | null {
         && typeof shot.voiceoverOrDialogue === "string";
       const motion = shot.motionDirection as unknown as Record<string, unknown> | undefined;
       const motionValid = motion && motionFields.every((field) => typeof motion[field] === "string") && ["restrained", "moderate", "energetic"].includes(String(motion.motionIntensity));
-      return stringsComplete && motionValid && Number.isInteger(shot.sceneNumber);
+      const cameraValid = !cameraDirectionError(String(shot.cameraMovement ?? "")) && !cameraDirectionError(String(motion?.cameraMotion ?? ""));
+      const screenText = String(shot.on_screen_text ?? "").trim();
+      const onScreenTextValid = Boolean(screenText) && screenText.length <= 72;
+      return stringsComplete && motionValid && cameraValid && onScreenTextValid && Number.isInteger(shot.sceneNumber);
     });
     if (!structurallyValid) return null;
     const boundaries = [0, 4, 10, 14, 20, 26, 30];
     const shots = parsed.shots.map((shot, index) => ({ ...shot, shotNumber: index + 1, startTime: boundaries[index], endTime: boundaries[index + 1] }));
-    return {
+    const generation = {
       title: parsed.title.trim() || "Directed 30-second treatment",
       duration: parsed.duration.trim() || "30 seconds",
       brandBible: parsed.brandBible,
@@ -156,6 +162,8 @@ function parseGeneration(outputText: string): ModelGeneration | null {
       visualBible: parsed.visualBible,
       shots,
     } as ModelGeneration;
+    if (findDuplicateWordIssue(generation as Generation)) return null;
+    return generation;
   } catch {
     return null;
   }
@@ -212,6 +220,7 @@ CONTINUITY RULES
 - Keep the approved concept fixed. Do not replace it with a new idea.
 - Make the single-minded proposition impossible to miss through visual storytelling.
 - Keep voiceover or dialogue natural and deliverable within each shot's timing.
+- Write clean reader-facing treatment copy. Never repeat a word accidentally, including repeats joined by a conjunction such as "rhythmic and rhythmic".
 - Adapt framing and composition to the selected platform.
 
 VISUAL BIBLE
@@ -236,16 +245,16 @@ SHOT DIRECTION
 - IMAGE SAFETY LOCK: Describe only action, product, environment, lighting and camera. Never describe a person's body, appearance or clothing except the minimum product contact needed to show the advertised product.
 - Every shot must depict exactly one continuous moment that can become one edge-to-edge production frame. Never put a match cut, before-and-after, multiple locations, or two moments inside one shot's visualDescription, displayVisual, subjectAction, or productAction. transitionIntent may describe the cut to the next shot, but the current frame must remain a single moment.
 - displayVisual must be one plain, filmable sentence of roughly 8–20 words.
-- displayCamera must be one concise instruction combining framing, lens, and movement, such as "85mm close-up · slow push-in".
+- displayCamera must be one concise instruction combining framing, lens, and measurable movement, such as "85mm close-up · 10% push-in over 4 seconds".
 - displayAction must be one concise, physical action sentence.
 - Keep the detailed production fields complete. The display fields are summaries for a producer, not replacements.
 - motionDirection must lock start/end states, blocking positions, movement path, subject/product/camera/environment/focus motion, intensity, performance, gaze and the editable transition beat.
-- Camera movement must serve story, emotion, product or reveal. Locked-off is valid. Choose lens character from scene geometry rather than random numbers.
+- cameraMovement and motionDirection.cameraMotion must each use digits to specify both movement amount and duration, such as "10% push-in over 4 seconds". A locked camera must be written as "0% movement over 4 seconds". Never use vague terms such as slow, subtle, gentle, slight, gradual, steady, restrained, minimal, micro, noticeable, or "a clearly observable amount".
 - Direct micro-expression, gaze, gesture, body language and product interaction. Never default to smiling at camera.
 - For every shot, locationAndProps must specify only the set dressing and props visible in that frame while staying inside the shared location logic.
 - Vary action, framing, angle, lens, and movement so the sequence progresses visually.
 - Do not write final image prompts. The application constructs them from the shared Visual Bible and shot direction.
-- sceneNumber groups shots that share one dramatic scene. productAction, performanceDirection, focusBehaviour, audioIntent, copyOrDialogue and transitionIntent must be concise and useful; use "None" when genuinely not applicable.
+- Put every exact word, number, symbol, caption, label, or CTA that must appear in the finished frame in on_screen_text, limited to 72 characters. Use "None" when no text is required. Never describe that readable text as already present in displayVisual, visualDescription, locationAndProps, productPresence, or any image-facing field; the application renders on_screen_text later as code. sceneNumber groups shots that share one dramatic scene. productAction, performanceDirection, focusBehaviour, audioIntent, copyOrDialogue and transitionIntent must be concise and useful; use "None" when genuinely not applicable.
 
 ${proofSafetyInstruction}
 
@@ -342,20 +351,40 @@ const post = async (request: Request) => {
     }
     return loggedJson({ error: "The storyboard came back incomplete. Please generate it again." }, { status: 502 });
   }
+  const duplicateCopy = findDuplicateWordIssue(generation, selectedConcept);
+  if (duplicateCopy) {
+    return loggedJson({ error: `The treatment copy repeats "${duplicateCopy.word}" in ${duplicateCopy.field}. Please revise the creative direction before publishing.` }, { status: 422 });
+  }
 
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
   if (!convexUrl) {
     console.warn("Storyboard generated without persistence: NEXT_PUBLIC_CONVEX_URL is missing");
     return loggedJson({ generation, saved: false });
   }
+
+  let script: string;
+  try {
+    const treatment: TreatmentData = {
+      brief: { intent, brandProduct, audience, proposition, platform, visualTones, testObjective: suppliedTestObjective, testObjectiveOther, preserveDetails },
+      concept: selectedConcept,
+      generation,
+    };
+    const timings = generation.shots.map((shot) => ({ duration: shot.endTime - shot.startTime }));
+    script = await generateVoiceoverScript(treatment, timings, externalApiCall);
+  } catch (error) {
+    console.error("Voiceover script-writing step failed", error);
+    return loggedJson({ error: "The storyboard was completed, but the voiceover script-writing step did not pass validation. Please generate it again." }, { status: 502 });
+  }
+
+  const generationWithScript: Generation = { ...generation, script };
   try {
     const client = new ConvexHttpClient(convexUrl);
-    const generationId = await externalApiCall(() => client.mutation(anyApi.generations.save, { intent, testObjective: suppliedTestObjective, testObjectiveOther, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, shotList: JSON.stringify(generation.shots) }));
+    const generationId = await externalApiCall(() => client.mutation(anyApi.generations.save, { intent, testObjective: suppliedTestObjective, testObjectiveOther, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, script, shotList: JSON.stringify(generation.shots) }));
     if (runId) await externalApiCall(() => client.mutation(anyApi.runs.setStage, { id: runId, status: "images_generating", step: `Drawing frame 1 of ${generation.shots.length}`, currentCount: 0, totalCount: generation.shots.length, generationId }));
-    return loggedJson({ generation, generationId, saved: true });
+    return loggedJson({ generation: generationWithScript, generationId, saved: true });
   } catch (error) {
     console.warn("Storyboard generated but Convex persistence failed", error);
-    return loggedJson({ generation, saved: false });
+    return loggedJson({ generation: generationWithScript, saved: false });
   }
 };
 

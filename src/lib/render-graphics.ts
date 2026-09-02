@@ -12,7 +12,8 @@ let loadedFont: Promise<Font> | undefined;
 function fontFace() {
   loadedFont ??= readFile(join(process.cwd(), "node_modules", "next", "dist", "compiled", "@vercel", "og", "Geist-Regular.ttf")).then((buffer) => {
     const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
-    return opentype.parse(data);
+    const parserModule = opentype as unknown as { parse?: (value: ArrayBuffer) => Font; default?: { parse: (value: ArrayBuffer) => Font } };
+    return (parserModule.parse ?? parserModule.default?.parse)?.(data) as Font;
   });
   return loadedFont;
 }
@@ -22,20 +23,23 @@ function textPath(font: Font, value: string, x: number, y: number, size: number,
   return `<path d="${font.getPath(value, left, y, size).toPathData(2)}" fill="${fill}"/>`;
 }
 
-function lines(value: string, maximum = 34) {
-  const words = value.trim().split(/\s+/);
+function lines(value: string, maximum = 34, maximumLines?: number) {
   const output: string[] = [];
-  for (const word of words) {
-    const current = output.at(-1);
-    if (!current || `${current} ${word}`.length > maximum) output.push(word);
-    else output[output.length - 1] = `${current} ${word}`;
+  for (const explicitLine of value.trim().split(/\s*(?:\n|\|)\s*/)) {
+    const wrapped: string[] = [];
+    for (const word of explicitLine.split(/\s+/)) {
+      const current = wrapped.at(-1);
+      if (!current || `${current} ${word}`.length > maximum) wrapped.push(word);
+      else wrapped[wrapped.length - 1] = `${current} ${word}`;
+    }
+    output.push(...wrapped);
   }
-  return output.slice(0, 3);
+  return maximumLines ? output.slice(0, maximumLines) : output;
 }
 
 export async function createScreenCopyOverlay(width: number, height: number, briefLine: string) {
   const font = await fontFace();
-  const copy = lines(briefLine, 31);
+  const copy = lines(briefLine, 31, 3);
   const x = Math.round(width * 0.11);
   const y = Math.round(height * 0.55);
   const panelWidth = Math.round(width * 0.67);
@@ -44,6 +48,32 @@ export async function createScreenCopyOverlay(width: number, height: number, bri
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect x="${x}" y="${y}" width="${panelWidth}" height="${panelHeight}" fill="${INK}" fill-opacity=".93" stroke="${CORAL}" stroke-width="3"/>
     ${textPath(font, "THE BRIEF", x + 34, y + 52, 18, CORAL)}
+    ${text}
+  </svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+export function requiredOnScreenText(value?: string) {
+  const text = String(value ?? "").trim();
+  return !text || /^(?:none|n\/a|no text)$/i.test(text) ? null : text;
+}
+
+export async function createOnScreenTextOverlay(width: number, height: number, value: string) {
+  const font = await fontFace();
+  const copy = lines(value, width > height ? 34 : 22);
+  if (copy.length > 3) throw new Error(`On-screen text is too long to render without truncation: ${value}`);
+  const fontSize = Math.max(32, Math.round(Math.min(width, height) * 0.052));
+  const lineHeight = Math.round(fontSize * 1.2);
+  const paddingX = Math.round(width * 0.04);
+  const paddingY = Math.round(height * 0.025);
+  const textWidth = Math.max(...copy.map((line) => font.getAdvanceWidth(line, fontSize)));
+  const panelWidth = Math.min(Math.round(width * 0.88), Math.round(textWidth + paddingX * 2));
+  const panelHeight = lineHeight * copy.length + paddingY * 2;
+  const x = Math.round((width - panelWidth) / 2);
+  const y = Math.round(height * 0.78 - panelHeight / 2);
+  const text = copy.map((line, index) => textPath(font, line, width / 2, y + paddingY + fontSize + index * lineHeight, fontSize, PAPER, "middle")).join("");
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="${x}" y="${y}" width="${panelWidth}" height="${panelHeight}" fill="${INK}" fill-opacity=".94" stroke="${CORAL}" stroke-width="4"/>
     ${text}
   </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();

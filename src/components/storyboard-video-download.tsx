@@ -126,14 +126,14 @@ async function recordStoryboardVideo() {
 }
 
 export function StoryboardVideoDownload({ storyboardId }: { storyboardId?: string }) {
-  const [buttonText, setButtonText] = useState("DOWNLOAD 30S ANIMATIC");
+  const [buttonText, setButtonText] = useState("DOWNLOAD AI ANIMATIC PREVIEW");
   const recording = buttonText === "RECORDING 30S…";
 
   async function download() {
     setButtonText("RECORDING 30S…");
     try {
       await recordStoryboardVideo();
-      setButtonText("DOWNLOAD 30S ANIMATIC");
+      setButtonText("DOWNLOAD AI ANIMATIC PREVIEW");
     } catch (error) {
       setButtonText(error instanceof Error ? `ERROR: ${error.message}` : "ERROR: VIDEO DOWNLOAD FAILED");
     }
@@ -141,7 +141,7 @@ export function StoryboardVideoDownload({ storyboardId }: { storyboardId?: strin
 
   return <div className="animatic-actions">
     <button className="export-button" type="button" disabled={recording} onClick={download}>{buttonText}</button>
-    <p className="animatic-helper">Six storyboard frames with motion and transitions. Not a filmed video.</p>
+    <p className="animatic-helper">Six storyboard frames with motion and transitions. This is an AI animatic preview, not a finished film.</p>
     <RealVideoRequest storyboardId={storyboardId} />
   </div>;
 }
