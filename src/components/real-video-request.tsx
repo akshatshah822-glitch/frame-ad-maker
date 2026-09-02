@@ -35,6 +35,7 @@ export function RealVideoRequest({ storyboardId }: Props) {
 
   return <div className="real-video-request">
     <button className="real-video-cta" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Get this as a real video, ₹200, delivered in 24h</button>
+    <p className="real-video-helper">Paid delivery adds a human-reviewed edit, polished sound, and a delivery-ready master within 24 hours.</p>
     {open ? <form onSubmit={submit}>
       <label>Email<input name="email" type="email" autoComplete="email" required placeholder="you@company.com" /></label>
       <label>Brand name<input name="brandName" type="text" autoComplete="organization" required placeholder="Your brand" /></label>

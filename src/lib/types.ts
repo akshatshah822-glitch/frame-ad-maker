@@ -125,6 +125,7 @@ export type Shot = {
   lighting: string;
   audio: string;
   voiceoverOrDialogue: string;
+  on_screen_text?: string;
   productPresence: string;
   locationAndProps: string;
   productAction?: string;

@@ -6,8 +6,8 @@ import { promisify } from "node:util";
 import type { TreatmentData, VideoProduction } from "@/lib/types";
 import { generateNarrationTrack } from "@/lib/voice";
 import { getVideoConfig } from "@/lib/video-config";
-import { probeFinalVideo } from "@/lib/video-qa";
-import { createScreenCopyOverlay } from "@/lib/render-graphics";
+import { probeFinalVideo, verifyOnScreenText } from "@/lib/video-qa";
+import { createOnScreenTextOverlay, requiredOnScreenText } from "@/lib/render-graphics";
 
 const exec = promisify(execFile);
 
@@ -55,13 +55,12 @@ export async function assembleVideoStep(treatment: TreatmentData, production: Vi
   const sourceIndex = position > 1 ? 1 : 0;
   const keyframeIndex = sourceIndex + 1;
   inputs.push("-i", source, "-loop", "1", "-i", keyframe);
-  const shotText = [shot.visualDescription, shot.subjectAction, shot.locationAndProps, shot.productPresence].join(" ");
-  const containsScreen = /\b(screen|display|monitor|phone|interface|console|dashboard)\b/i.test(shotText);
+  const onScreenText = requiredOnScreenText(shot.on_screen_text);
   let nextInputIndex = keyframeIndex + 1;
   let overlayIndex: number | undefined;
-  if (containsScreen) {
-    const overlay = join(directory, `screen-copy-${clip.shotNumber}.png`);
-    await writeFile(overlay, await createScreenCopyOverlay(config.width, config.height, treatment.brief.proposition));
+  if (onScreenText) {
+    const overlay = join(directory, `on-screen-text-${clip.shotNumber}.png`);
+    await writeFile(overlay, await createOnScreenTextOverlay(config.width, config.height, onScreenText));
     overlayIndex = nextInputIndex++;
     inputs.push("-loop", "1", "-i", overlay);
   }
@@ -106,5 +105,16 @@ export async function assembleVideoStep(treatment: TreatmentData, production: Vi
   if (position < orderedClips.length) return { bytes: new Uint8Array(await readFile(output)), qa: undefined };
   const qa = await probeFinalVideo(output, { width: config.width, height: config.height, duration: expectedDuration });
   if (!qa.passed) throw new Error(`Final technical QA failed: ${JSON.stringify(qa)}`);
+  const textExpectations = orderedClips.flatMap((item, index) => {
+    const expectedShot = treatment.generation.shots.find((candidate) => candidate.shotNumber === item.shotNumber);
+    const text = requiredOnScreenText(expectedShot?.on_screen_text);
+    if (!text) return [];
+    const start = orderedClips.slice(0, index).reduce((total, candidate) => total + candidate.duration, 0);
+    return [{ shotNumber: item.shotNumber, text, timestamp: start + item.duration / 2 }];
+  });
+  const onScreenTextChecks = await verifyOnScreenText(output, textExpectations, { width: config.width, height: config.height });
+  const missingText = onScreenTextChecks.find((check) => !check.passed);
+  if (missingText) throw new Error(`Shot ${missingText.shotNumber} is missing on-screen text "${missingText.expected}" in the assembled frame.`);
+  qa.onScreenTextChecks = onScreenTextChecks;
   return { bytes: new Uint8Array(await readFile(output)), qa };
 }

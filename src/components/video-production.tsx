@@ -98,9 +98,9 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
     : production.status === "clips_ready" ? 88
     : Math.round(4 + clipProgress * 82);
   if (production.status === "ready" && production.finalVideoUrl) return <section className="final-ad" aria-labelledby="final-ad-title">
-    <p className="eyebrow">Final film</p><h2 id="final-ad-title">Your ad is ready.</h2>
+    <p className="eyebrow">AI preview</p><h2 id="final-ad-title">Your AI preview is ready.</h2>
     <video ref={videoRef} controls playsInline preload="metadata" poster={posterUrl} src={production.finalVideoUrl} onPlay={() => { setIsPlaying(true); if (!filmShown.current) { filmShown.current = true; track("film_shown", { treatmentId: generationId }); } }} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)}>Your browser cannot play this video.</video>
-    <div className="final-ad-actions"><button className="video-primary" type="button" aria-label={isPlaying ? "Pause film" : "Play film"} onClick={() => { const video = videoRef.current; if (!video) return; if (video.paused) void video.play(); else video.pause(); }}>{isPlaying ? "Pause" : "Play"}</button><a className="export-button" href={`/api/video/download/${generationId}`} download>{treatmentTitle ? `Download ${treatmentTitle}` : "Download MP4"}</a></div>
+    <div className="final-ad-actions"><button className="video-primary" type="button" aria-label={isPlaying ? "Pause AI preview" : "Play AI preview"} onClick={() => { const video = videoRef.current; if (!video) return; if (video.paused) void video.play(); else video.pause(); }}>{isPlaying ? "Pause" : "Play"}</button><a className="export-button" href={`/api/video/download/${generationId}`} download>{treatmentTitle ? `Download ${treatmentTitle} AI preview` : "Download AI preview"}</a></div>
   </section>;
 
   return <section className="video-progress" aria-live="polite" aria-busy={["creating", "generating", "assembling"].includes(production.status)}>
