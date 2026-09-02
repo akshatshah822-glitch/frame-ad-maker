@@ -15,7 +15,6 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   const [error, setError] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const assemblyRequested = useRef(false);
-  const startRequested = useRef(false);
   const filmShown = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const productionStatus = production?.status;
@@ -37,19 +36,6 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Render status could not be checked.")), 0);
     return () => window.clearTimeout(timer);
   }, [call, generationId]);
-
-  useEffect(() => {
-    if (!generationId || !statusChecked || production || startRequested.current) return;
-    startRequested.current = true;
-    setWorking(true);
-    setError("");
-    call("/api/video/start", { generationId })
-      .catch((reason) => {
-        startRequested.current = false;
-        setError(reason instanceof Error ? reason.message : "Video production could not start.");
-      })
-      .finally(() => setWorking(false));
-  }, [call, generationId, production, statusChecked]);
 
   useEffect(() => {
     if (!generationId || !productionStatus || !["creating", "generating"].includes(productionStatus)) return;
@@ -76,12 +62,24 @@ export function VideoProduction({ generationId, posterUrl, treatmentTitle, initi
   }, [call, generationId, production?.status]);
 
   if (!generationId) return null;
+  const start = async () => {
+    setWorking(true);
+    setError("");
+    try {
+      await call("/api/video/start", { generationId });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Video production could not start.");
+    } finally {
+      setWorking(false);
+    }
+  };
   const retry = async (shotNumber: number) => { setError(""); try { await call("/api/video/retry", { generationId, shotNumber }); } catch (reason) { setError(reason instanceof Error ? reason.message : "This shot could not be retried."); } };
   const cancel = async () => { setWorking(true); try { await call("/api/video/cancel", { generationId }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Production could not be cancelled."); } finally { setWorking(false); } };
 
   if (!production) return <section className="video-gate" aria-labelledby="video-gate-title" aria-live="polite">
-    <p className="eyebrow">Film production</p><h2 id="video-gate-title">Rendering 0 of 6</h2>
-    <p>{statusChecked ? "Starting the six shots automatically…" : "Checking for an existing render…"}</p>
+    <p className="eyebrow">Film production</p><h2 id="video-gate-title">Storyboard complete</h2>
+    <p>{statusChecked ? "Your six frames are ready. Start film production when you’re ready." : "Checking for an existing render…"}</p>
+    {statusChecked ? <div className="video-start-action"><button className="video-primary" type="button" onClick={start} disabled={working}>{working ? "Starting film…" : "Start film"}</button><span>Starts the six film shots</span></div> : null}
     {error ? <p className="video-error" role="alert">{error}</p> : null}
   </section>;
 
