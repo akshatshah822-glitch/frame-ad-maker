@@ -1,6 +1,18 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+const questionOption = v.union(v.literal("A"), v.literal("B"), v.literal("C"), v.literal("D"));
+const questionSolve = v.object({
+  question: v.string(),
+  options: v.object({ A: v.string(), B: v.string(), C: v.string(), D: v.string() }),
+  correct: questionOption,
+  commonWrong: questionOption,
+  trap: v.string(),
+  eliminations: v.array(v.object({ option: questionOption, reason: v.string() })),
+  rule: v.string(),
+  answerLine: v.string(),
+});
+
 export default defineSchema({
   signups: defineTable({
     email: v.string(),
@@ -28,6 +40,8 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_client", ["clientId"]).index("by_status", ["status"]),
   generations: defineTable({
+    type: v.optional(v.union(v.literal("ad"), v.literal("question"))), solve: v.optional(questionSolve),
+    sourceFileName: v.optional(v.string()), sourceSlideNumber: v.optional(v.number()),
     intent: v.optional(v.string()), testObjective: v.optional(v.string()), testObjectiveOther: v.optional(v.string()), preserveDetails: v.optional(v.string()),
     brandProduct: v.optional(v.string()), audience: v.optional(v.string()), proposition: v.optional(v.string()), platform: v.optional(v.string()), visualTones: v.optional(v.array(v.string())),
     brandName: v.optional(v.string()), brandCategory: v.optional(v.string()), targetAudience: v.optional(v.string()), usp: v.optional(v.string()), product: v.optional(v.string()),

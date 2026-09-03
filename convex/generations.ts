@@ -1,9 +1,35 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+const questionOption = v.union(v.literal("A"), v.literal("B"), v.literal("C"), v.literal("D"));
+const questionSolve = v.object({
+  question: v.string(),
+  options: v.object({ A: v.string(), B: v.string(), C: v.string(), D: v.string() }),
+  correct: questionOption,
+  commonWrong: questionOption,
+  trap: v.string(),
+  eliminations: v.array(v.object({ option: questionOption, reason: v.string() })),
+  rule: v.string(),
+  answerLine: v.string(),
+});
+
 export const save = mutation({
   args: { intent: v.optional(v.string()), testObjective: v.optional(v.string()), testObjectiveOther: v.optional(v.string()), preserveDetails: v.optional(v.string()), brandProduct: v.string(), audience: v.string(), proposition: v.string(), platform: v.string(), visualTones: v.array(v.string()), selectedConcept: v.string(), brandBible: v.optional(v.string()), creativeGrammar: v.optional(v.string()), visualBible: v.string(), title: v.string(), script: v.optional(v.string()), shotList: v.string() },
   handler: async (ctx, args) => ctx.db.insert("generations", { ...args, createdAt: Date.now() }),
+});
+
+export const saveQuestion = mutation({
+  args: { title: v.string(), solve: questionSolve, script: v.string(), sourceFileName: v.string(), sourceSlideNumber: v.number() },
+  handler: async (ctx, { title, solve, script, sourceFileName, sourceSlideNumber }) => ctx.db.insert("generations", {
+    type: "question",
+    title,
+    solve,
+    script,
+    sourceFileName,
+    sourceSlideNumber,
+    shotList: "[]",
+    createdAt: Date.now(),
+  }),
 });
 
 export const generateImageUploadUrl = mutation({
