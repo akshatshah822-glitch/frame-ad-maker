@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 
-const allowedEvents = new Set(["brief_started", "brief_submitted", "directions_shown", "film_shown", "email_submitted"]);
+const allowedEvents = new Set(["page_view", "brief_started", "brief_submitted", "directions_shown", "film_shown", "email_submitted"]);
 const productionHost = "frame-ad-maker.vercel.app";
 
 const post = async (request: Request) => {
@@ -19,6 +19,7 @@ const post = async (request: Request) => {
     body: JSON.stringify({ api_key: apiKey, event: body.event, timestamp: new Date().toISOString(), properties: { distinct_id: distinctId, $current_url: body.path || "/", source: "frame_web", env: "production", ...(body.event === "film_shown" && body.treatmentId ? { treatment_id: body.treatmentId.slice(0, 128) } : {}), ...(body.event === "email_submitted" && body.email ? { email: body.email.slice(0, 254) } : {}) } }),
   });
   if (!response.ok) return NextResponse.json({ error: "Analytics delivery failed." }, { status: 502 });
+  console.info("Analytics event sent", { event: body.event, path: body.path || "/", environment: "production" });
   return NextResponse.json({ delivered: true, event: body.event });
 };
 
