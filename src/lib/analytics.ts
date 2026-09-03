@@ -1,4 +1,4 @@
-export type FrameEvent = "brief_started" | "brief_submitted" | "directions_shown" | "film_shown" | "email_submitted";
+export type FrameEvent = "page_view" | "brief_started" | "brief_submitted" | "directions_shown" | "film_shown" | "email_submitted";
 
 const productionHost = "frame-ad-maker.vercel.app";
 
