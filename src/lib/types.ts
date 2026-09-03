@@ -1,4 +1,26 @@
 export type CreativeIntent = "performance" | "cinematic";
+export type GenerationType = "ad" | "question";
+export type QuestionOption = "A" | "B" | "C" | "D";
+
+export type QuestionSolve = {
+  question: string;
+  options: Record<QuestionOption, string>;
+  correct: QuestionOption;
+  commonWrong: QuestionOption;
+  trap: string;
+  eliminations: Array<{ option: QuestionOption; reason: string }>;
+  rule: string;
+  answerLine: string;
+};
+
+export type QuestionSource = {
+  fileName: string;
+  slideNumber: number;
+  question: string;
+  options: Record<QuestionOption, string>;
+  commonWrong: QuestionOption | "";
+  trap: string;
+};
 
 export type Brief = {
   intent: CreativeIntent;
@@ -143,6 +165,8 @@ export type Shot = {
 };
 
 export type Generation = {
+  type?: GenerationType;
+  solve?: QuestionSolve;
   title: string;
   duration: string;
   script?: string;
