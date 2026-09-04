@@ -41,6 +41,10 @@ export type VoiceoverValidation = {
   sentences: VoiceoverSentenceReview[];
 };
 
+export type StoryboardNarrationResult =
+  | { script: string; narrationError?: never }
+  | { script: null; narrationError: string };
+
 const validationSchema = {
   type: "object",
   additionalProperties: false,
@@ -102,22 +106,42 @@ async function generateDraft(treatment: TreatmentData, wordBudget: number, exter
   return script;
 }
 
-export async function generateVoiceoverScript(treatment: TreatmentData, timings: VoiceoverTiming[], externalApiCall: VoiceoverExternalCall = directCall) {
+function validationFailureMessage(validation: VoiceoverValidation) {
+  return `Voiceover script failed its spoken-language validation: ${validation.sentences.filter((sentence) => !sentence.passes).map((sentence) => sentence.note).join(" ")}`;
+}
+
+function applyWordBudget(validation: VoiceoverValidation, script: string, wordBudget: number) {
+  const wordCount = countWords(script);
+  if (wordCount <= wordBudget) return validation;
+  return { passes: false, sentences: [...validation.sentences, { text: script, passes: false, note: `The script has ${wordCount} words and exceeds the ${wordBudget}-word film budget.` }] };
+}
+
+export async function generateStoryboardNarration(treatment: TreatmentData, timings: VoiceoverTiming[], externalApiCall: VoiceoverExternalCall = directCall): Promise<StoryboardNarrationResult> {
   const wordBudget = voiceoverWordBudget(timings);
-  let script = await generateDraft(treatment, wordBudget, externalApiCall);
-  let validation = await validateVoiceoverScript(script, externalApiCall);
-  const initialWordCount = countWords(script);
-  if (initialWordCount > wordBudget) validation = { passes: false, sentences: [...validation.sentences, { text: script, passes: false, note: `The script has ${initialWordCount} words and exceeds the ${wordBudget}-word film budget.` }] };
-  if (!validation.passes) {
-    const notes = validation.sentences.filter((sentence) => !sentence.passes).map((sentence) => `${sentence.text}: ${sentence.note}`).join("\n");
-    const rejectedDraft = script;
-    script = await generateDraft(treatment, wordBudget, externalApiCall, rejectedDraft, notes);
-    validation = await validateVoiceoverScript(script, externalApiCall);
+  let rejectedDraft: string | undefined;
+  let correctionNotes: string | undefined;
+  let lastFailure = "Voiceover script failed its spoken-language validation.";
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const script = await generateDraft(treatment, wordBudget, externalApiCall, rejectedDraft, correctionNotes);
+    const validation = applyWordBudget(await validateVoiceoverScript(script, externalApiCall), script, wordBudget);
+    if (validation.passes) {
+      console.log(`narration: passed on attempt ${attempt}`);
+      return { script };
+    }
+    lastFailure = validationFailureMessage(validation);
+    rejectedDraft = script;
+    correctionNotes = lastFailure;
   }
-  const finalWordCount = countWords(script);
-  if (finalWordCount > wordBudget) validation = { passes: false, sentences: [...validation.sentences, { text: script, passes: false, note: `The script has ${finalWordCount} words and exceeds the ${wordBudget}-word film budget.` }] };
-  if (!validation.passes) throw new Error(`Voiceover script failed its spoken-language validation: ${validation.sentences.filter((sentence) => !sentence.passes).map((sentence) => sentence.note).join(" ")}`);
-  return script;
+
+  console.log("narration: skipped after 3 failed validations");
+  return { script: null, narrationError: lastFailure };
+}
+
+export async function generateVoiceoverScript(treatment: TreatmentData, timings: VoiceoverTiming[], externalApiCall: VoiceoverExternalCall = directCall) {
+  const result = await generateStoryboardNarration(treatment, timings, externalApiCall);
+  if (result.script) return result.script;
+  throw new Error(result.narrationError);
 }
 
 export async function ensureVoiceoverScript(generationId: string, treatment: TreatmentData, clips: VideoClip[]) {

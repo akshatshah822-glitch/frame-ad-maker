@@ -169,7 +169,7 @@ export type Generation = {
   solve?: QuestionSolve;
   title: string;
   duration: string;
-  script?: string;
+  script?: string | null;
   visualBible: VisualBible;
   brandBible?: BrandBible;
   creativeGrammar?: CreativeGrammar;

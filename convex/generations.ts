@@ -14,7 +14,7 @@ const questionSolve = v.object({
 });
 
 export const save = mutation({
-  args: { intent: v.optional(v.string()), testObjective: v.optional(v.string()), testObjectiveOther: v.optional(v.string()), preserveDetails: v.optional(v.string()), brandProduct: v.string(), audience: v.string(), proposition: v.string(), platform: v.string(), visualTones: v.array(v.string()), selectedConcept: v.string(), brandBible: v.optional(v.string()), creativeGrammar: v.optional(v.string()), visualBible: v.string(), title: v.string(), script: v.optional(v.string()), shotList: v.string() },
+  args: { intent: v.optional(v.string()), testObjective: v.optional(v.string()), testObjectiveOther: v.optional(v.string()), preserveDetails: v.optional(v.string()), brandProduct: v.string(), audience: v.string(), proposition: v.string(), platform: v.string(), visualTones: v.array(v.string()), selectedConcept: v.string(), brandBible: v.optional(v.string()), creativeGrammar: v.optional(v.string()), visualBible: v.string(), title: v.string(), script: v.optional(v.union(v.string(), v.null())), shotList: v.string() },
   handler: async (ctx, args) => ctx.db.insert("generations", { ...args, createdAt: Date.now() }),
 });
 

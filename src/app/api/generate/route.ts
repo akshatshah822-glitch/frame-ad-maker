@@ -7,7 +7,7 @@ import type { BrandBible, Concept, CreativeGrammar, Generation, Shot, TreatmentD
 import { classifyOpenAIError } from "@/lib/openai-error";
 import { findUnsupportedProof, neutralizeUnsupportedProof, proofSafetyInstruction } from "@/lib/proof-safety";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
-import { generateVoiceoverScript } from "@/lib/voiceover-script";
+import { generateStoryboardNarration } from "@/lib/voiceover-script";
 import { cameraDirectionError } from "@/lib/camera-direction";
 import { findDuplicateWordIssue } from "@/lib/treatment-copy-quality";
 
@@ -169,6 +169,26 @@ function parseGeneration(outputText: string): ModelGeneration | null {
   }
 }
 
+function isMissing(value: unknown) {
+  return value == null || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
+function fillMissingFields<T>(source: T, repair: unknown, filled: string[], path = ""): T {
+  if (Array.isArray(source) && Array.isArray(repair)) return source.map((value, index) => fillMissingFields(value, repair[index], filled, `${path}[${index}]`)) as T;
+  if (!source || typeof source !== "object" || Array.isArray(source) || !repair || typeof repair !== "object" || Array.isArray(repair)) return source;
+  const merged = { ...(source as Record<string, unknown>) };
+  for (const [key, repairValue] of Object.entries(repair as Record<string, unknown>)) {
+    const fieldPath = path ? `${path}.${key}` : key;
+    if (isMissing(merged[key]) && !isMissing(repairValue)) {
+      merged[key] = repairValue;
+      filled.push(fieldPath);
+    } else if (merged[key] && typeof merged[key] === "object" && repairValue && typeof repairValue === "object") {
+      merged[key] = fillMissingFields(merged[key], repairValue, filled, fieldPath);
+    }
+  }
+  return merged as T;
+}
+
 async function makeGeneration({ intent, testObjective, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept, qaTargetShotCount, externalApiCall }: { intent: "performance" | "cinematic"; testObjective?: string; preserveDetails?: string; brandProduct: string; audience: string; proposition: string; platform: string; visualTones: string[]; selectedConcept: Concept; qaTargetShotCount?: number; externalApiCall: ExternalApiCall }) {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const response = await externalApiCall(() => client.responses.create({
@@ -273,8 +293,23 @@ Return only the structured storyboard.`,
       input: `USER-SUPPLIED SOURCE OF TRUTH\n${suppliedSource}\n\nUNSUPPORTED PROOF FOUND\n${proofIssues.join(", ")}\n\nSTORYBOARD TO REPAIR\n${JSON.stringify(modelGeneration)}\n\nReturn the complete repaired storyboard.`,
       text: { format: { type: "json_schema", name: "repaired_concept_led_storyboard", strict: true, schema: outputSchema } },
     }));
-    modelGeneration = parseGeneration(repaired.output_text);
-    if (!modelGeneration) return null;
+    const filled: string[] = [];
+    let repairedOutput: unknown;
+    try { repairedOutput = JSON.parse(repaired.output_text); } catch { repairedOutput = null; }
+    const preRepairGeneration = modelGeneration;
+    const repairedGeneration = repairedOutput ? parseGeneration(JSON.stringify(fillMissingFields(preRepairGeneration, repairedOutput, filled))) : null;
+    const retainedKeys = repairedGeneration?.shots.every((shot, index) => {
+      const before = Object.keys(preRepairGeneration.shots[index] ?? {}).sort().join(",");
+      const after = Object.keys(shot).sort().join(",");
+      return before === after;
+    });
+    if (!repairedGeneration || !retainedKeys) {
+      console.log("repair discarded, using pre-repair storyboard");
+      modelGeneration = preRepairGeneration;
+    } else {
+      console.log(`repair applied, filled fields: ${filled.join(", ") || "none"}`);
+      modelGeneration = repairedGeneration;
+    }
     if (findUnsupportedProof(modelGeneration, suppliedSource).length) modelGeneration = neutralizeUnsupportedProof(modelGeneration, suppliedSource);
   }
   const sharedPromptContext = {
@@ -347,9 +382,12 @@ const post = async (request: Request) => {
   }
   if (!generation) {
     if (runId && process.env.NEXT_PUBLIC_CONVEX_URL) {
-      try { await externalApiCall(() => new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard came back incomplete." })); } catch { /* Preserve the generation error response. */ }
+      try {
+        await externalApiCall(() => new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!).mutation(anyApi.runs.fail, { id: runId, step: "Building the storyboard", error: "The storyboard came back incomplete." }));
+      } catch { /* Preserve the generation error response. */ }
     }
-    return loggedJson({ error: "The storyboard came back incomplete. Please generate it again." }, { status: 502 });
+    const responseBody = { error: "The storyboard came back incomplete. Please generate it again." };
+    return loggedJson(responseBody, { status: 502 });
   }
   const duplicateCopy = findDuplicateWordIssue(generation, selectedConcept);
   if (duplicateCopy) {
@@ -362,7 +400,7 @@ const post = async (request: Request) => {
     return loggedJson({ generation, saved: false });
   }
 
-  let script: string;
+  let narration: Awaited<ReturnType<typeof generateStoryboardNarration>>;
   try {
     const treatment: TreatmentData = {
       brief: { intent, brandProduct, audience, proposition, platform, visualTones, testObjective: suppliedTestObjective, testObjectiveOther, preserveDetails },
@@ -370,17 +408,18 @@ const post = async (request: Request) => {
       generation,
     };
     const timings = generation.shots.map((shot) => ({ duration: shot.endTime - shot.startTime }));
-    script = await generateVoiceoverScript(treatment, timings, externalApiCall);
+    narration = await generateStoryboardNarration(treatment, timings, externalApiCall);
   } catch (error) {
     console.error("Voiceover script-writing step failed", error);
     return loggedJson({ error: "The storyboard was completed, but the voiceover script-writing step did not pass validation. Please generate it again." }, { status: 502 });
   }
 
-  const generationWithScript: Generation = { ...generation, script };
+  const generationWithScript: Generation = { ...generation, script: narration.script };
   try {
     const client = new ConvexHttpClient(convexUrl);
-    const generationId = await externalApiCall(() => client.mutation(anyApi.generations.save, { intent, testObjective: suppliedTestObjective, testObjectiveOther, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, script, shotList: JSON.stringify(generation.shots) }));
+    const generationId = await externalApiCall(() => client.mutation(anyApi.generations.save, { intent, testObjective: suppliedTestObjective, testObjectiveOther, preserveDetails, brandProduct, audience, proposition, platform, visualTones, selectedConcept: JSON.stringify(selectedConcept), brandBible: JSON.stringify(generation.brandBible), creativeGrammar: JSON.stringify(generation.creativeGrammar), visualBible: JSON.stringify(generation.visualBible), title: generation.title, script: narration.script, shotList: JSON.stringify(generation.shots) }));
     if (runId) await externalApiCall(() => client.mutation(anyApi.runs.setStage, { id: runId, status: "images_generating", step: `Drawing frame 1 of ${generation.shots.length}`, currentCount: 0, totalCount: generation.shots.length, generationId }));
+    if (runId) await externalApiCall(() => client.mutation(anyApi.runs.setNarrationStatus, { id: runId, status: narration.script ? "passed" : "failed", error: narration.narrationError }));
     return loggedJson({ generation: generationWithScript, generationId, saved: true });
   } catch (error) {
     console.warn("Storyboard generated but Convex persistence failed", error);
