@@ -37,3 +37,12 @@ export const setStage = mutation({
     return true;
   },
 });
+
+export const setNarrationStatus = mutation({
+  args: { id: v.id("runs"), status: v.union(v.literal("passed"), v.literal("failed")), error: v.optional(v.string()) },
+  handler: async (ctx, { id, status, error }) => {
+    if (!await ctx.db.get(id)) return false;
+    await ctx.db.patch(id, { narrationStatus: status, narrationError: error, updatedAt: Date.now() });
+    return true;
+  },
+});
