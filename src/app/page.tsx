@@ -415,11 +415,14 @@ export default function Home() {
       });
       const result = await readJsonResponse<{ generation?: Generation; generationId?: string; saved?: boolean; error?: string }>(response);
       if (!response.ok || !result.generation) throw new Error(result.error || "The storyboard response was incomplete. Try again.");
+      const savedGenerationId = String(result.generationId ?? "").trim();
+      if (!result.saved || !savedGenerationId) throw new Error("We could not save this treatment. Retry.");
       setGeneration(result.generation);
-      setGenerationId(result.generationId ?? null);
-      setSaved(result.saved ?? false);
+      setGenerationId(savedGenerationId);
+      setSaved(true);
+      window.history.replaceState(window.history.state, "", `/treatment/${encodeURIComponent(savedGenerationId)}`);
       setPhase("images_generating");
-      await renderAllShots(result.generation, generationRun, result.generationId);
+      await renderAllShots(result.generation, generationRun, savedGenerationId);
     } catch (err) {
       if (runIdRef.current !== generationRun) return;
       setError(err instanceof Error ? err.message : "Something went wrong.");

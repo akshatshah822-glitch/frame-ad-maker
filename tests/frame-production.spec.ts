@@ -39,7 +39,7 @@ test("concept generation explains the wait and can return safely", async ({ page
   await page.getByLabel("What are we advertising?").fill("A considered everyday coffee");
   await page.getByLabel("Who specifically needs to care?").fill("Creative teams working through the afternoon");
   await page.getByLabel("What one thing should they remember?").fill("Good coffee can reset the whole day");
-  await page.getByRole("button", { name: "Develop concepts" }).click();
+  await page.getByRole("button", { name: "Develop directions" }).click();
   await expect(page.getByText("READING YOUR BRIEF")).toBeVisible();
   await expect(page.getByText("DRAFTING CREATIVE TERRITORIES")).toBeVisible({ timeout: 6_000 });
   await page.getByRole("button", { name: "Back to brief" }).click();
@@ -101,7 +101,7 @@ test("one failed frame ends in an accurate usable completion state", async ({ pa
   await page.getByLabel("What are we advertising?").fill("Frame Coffee");
   await page.getByLabel("Who specifically needs to care?").fill("Creative teams");
   await page.getByLabel("What one thing should they remember?").fill("One sip resets the afternoon");
-  await page.getByRole("button", { name: "Develop concepts" }).click();
+  await page.getByRole("button", { name: "Develop directions" }).click();
   await page.getByRole("button", { name: /Choose this direction/ }).first().click();
   await expect(page.getByText("STORYBOARD READY · 5/6 FRAMES")).toBeVisible();
   await expect(page.getByText("One frame couldn't be rendered.")).toBeVisible();
@@ -110,4 +110,52 @@ test("one failed frame ends in an accurate usable completion state", async ({ pa
   await expect(page.getByRole("button", { name: /Copy treatment/i })).toBeVisible();
   await expect(page.getByRole("link", { name: "Download PDF" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Share link" })).toBeVisible();
+});
+
+test("a saved ID replaces the landing URL before storyboard frames render", async ({ page }) => {
+  const concept = { conceptName: "The Quiet Reset", idea: "One sip restores order to a noisy afternoon.", hook: "A desk freezes mid-chaos.", story: "A tired team pauses. The product resets the room. Work resumes with clarity.", productRole: "The product creates the reset.", visualWorld: "A tactile office in warm afternoon light.", ending: "The room moves in rhythm again." };
+  const shots = Array.from({ length: 6 }, (_, index) => ({
+    shotNumber: index + 1, startTime: [0, 3, 7, 12, 18, 25][index], endTime: [3, 7, 12, 18, 25, 30][index], purpose: ["HOOK", "TENSION", "PRODUCT", "PROOF / ESCALATION", "PAYOFF", "BRAND ENDING"][index],
+    displayVisual: `A clear visual direction for shot ${index + 1}.`, displayCamera: "50mm medium · slow push-in", displayAction: "The subject completes one clear action.",
+    visualDescription: "A detailed production-ready visual description.", subjectAction: "The subject completes one clear action.", cameraFraming: "Medium", cameraAngle: "Eye level", lensSuggestion: "50mm", cameraMovement: "Slow push-in", lighting: "Motivated window light", audio: "Natural room tone", voiceoverOrDialogue: "", productPresence: "Product remains consistent", locationAndProps: "One continuous office set", imagePrompt: "A complete image prompt", imageStatus: "pending",
+  }));
+  let imageRequests = 0;
+  await page.route("**/api/runs", (route) => route.fulfill({ json: { runId: "test-run" } }));
+  await page.route("**/api/concepts", (route) => route.fulfill({ json: { concepts: [concept, { ...concept, conceptName: "Made With Patience" }, { ...concept, conceptName: "Pause Button" }] } }));
+  await page.route("**/api/generate", (route) => route.fulfill({ json: { saved: true, generationId: treatmentId, generation: { title: "The Quiet Reset", duration: "30 seconds", visualBible: { subject: "One consistent protagonist", product: "One consistent product", location: "One office", colorPalette: ["ink", "paper"], lighting: "Window light", cinematography: "Measured 50mm photography", texture: "Natural materials", continuityLocks: ["Same subject", "Same product"] }, shots } } }));
+  await page.route("**/api/images", (route) => { imageRequests += 1; return route.fulfill({ json: { imageUrl: "/window.svg", imageStorageId: `storage-${imageRequests}`, imageStatus: "complete" } }); });
+  await page.route("**/api/video/status", (route) => route.fulfill({ json: { production: null } }));
+  await page.goto("/");
+  await page.getByLabel("What are we advertising?").fill("Frame Coffee");
+  await page.getByLabel("Who specifically needs to care?").fill("Creative teams");
+  await page.getByLabel("What one thing should they remember?").fill("One sip resets the afternoon");
+  await page.getByRole("button", { name: "Develop directions" }).click();
+  await page.getByRole("button", { name: /Choose this direction/ }).first().click();
+  await expect(page).toHaveURL(new RegExp(`/treatment/${treatmentId}$`));
+  await expect.poll(() => imageRequests).toBe(6);
+  await expect(page.getByText("All six frames are ready. Start AI animatic preview production when you’re ready.")).toBeVisible();
+});
+
+test("a missing saved ID stays retryable and never draws storyboard frames", async ({ page }) => {
+  const concept = { conceptName: "The Quiet Reset", idea: "One sip restores order to a noisy afternoon.", hook: "A desk freezes mid-chaos.", story: "A tired team pauses. The product resets the room. Work resumes with clarity.", productRole: "The product creates the reset.", visualWorld: "A tactile office in warm afternoon light.", ending: "The room moves in rhythm again." };
+  const shots = Array.from({ length: 6 }, (_, index) => ({ shotNumber: index + 1, imagePrompt: `Prompt ${index + 1}`, imageStatus: "pending" }));
+  let generateRequests = 0;
+  let imageRequests = 0;
+  await page.route("**/api/runs", (route) => route.fulfill({ json: { runId: "test-run" } }));
+  await page.route("**/api/concepts", (route) => route.fulfill({ json: { concepts: [concept, { ...concept, conceptName: "Made With Patience" }, { ...concept, conceptName: "Pause Button" }] } }));
+  await page.route("**/api/generate", (route) => { generateRequests += 1; return route.fulfill({ json: { saved: true, generation: { title: "The Quiet Reset", duration: "30 seconds", visualBible: {}, shots } } }); });
+  await page.route("**/api/images", (route) => { imageRequests += 1; return route.abort(); });
+  await page.goto("/");
+  await page.getByLabel("What are we advertising?").fill("Frame Coffee");
+  await page.getByLabel("Who specifically needs to care?").fill("Creative teams");
+  await page.getByLabel("What one thing should they remember?").fill("One sip resets the afternoon");
+  await page.getByRole("button", { name: "Develop directions" }).click();
+  await page.getByRole("button", { name: /Choose this direction/ }).first().click();
+  await expect(page.locator("p.concepts-error")).toContainText("We could not save this treatment. Retry.");
+  await expect(page).toHaveURL(/\/$/);
+  await expect.poll(() => imageRequests).toBe(0);
+  await expect(page.getByText("All six frames are ready. Start AI animatic preview production when you’re ready.")).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry failed step" }).click();
+  await expect.poll(() => generateRequests).toBe(2);
+  await expect.poll(() => imageRequests).toBe(0);
 });
