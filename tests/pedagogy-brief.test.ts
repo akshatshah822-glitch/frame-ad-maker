@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import * as XLSX from "xlsx";
 import { assertNarrationFits, pedagogyWarnings, validatePedagogyRows } from "../src/lib/pedagogy-brief";
 import { createPedagogySlide } from "../src/lib/pedagogy-slide";
+import { PedagogyGrammarReviewError, reviewPedagogyNarration } from "../src/lib/pedagogy-narration";
 import { extractPedagogyRowsFromWorkbook } from "../src/lib/pedagogy-workbook";
 
 const rows = [
@@ -33,6 +35,33 @@ test("draws emphasis only when its exact phrase exists", async () => {
   const noMatch = await createPedagogySlide({ questionId: "Q-20", board: "x + y", emphasis: "missing", generatedTimeLabel: "0:00" });
   assert.ok(highlighted.byteLength > 1000);
   assert.notDeepEqual(highlighted, noMatch);
+});
+
+test("uses the configured question grammar reviewer without rewriting uploaded narration", async () => {
+  const parsed = validatePedagogyRows(rows);
+  const warnings = await reviewPedagogyNarration(parsed, async (narration) => {
+    assert.equal(narration, rows.find((row) => row.narration === narration)?.narration);
+    return { passes: true, issues: [] };
+  });
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(parsed.map((row) => row.narration), rows.map((row) => row.narration));
+});
+
+test("returns grammar concerns as warnings and reports a real grammar service failure", async () => {
+  const parsed = validatePedagogyRows(rows);
+  const warnings = await reviewPedagogyNarration(parsed, async () => ({ passes: false, issues: ["Sentence \"We now combine the terms.\": missing subject."] }));
+  assert.deepEqual(warnings, [
+    "Row 2: grammar warning: Sentence \"We now combine the terms.\": missing subject.",
+    "Row 3: grammar warning: Sentence \"We now combine the terms.\": missing subject.",
+    "Row 4: grammar warning: Sentence \"We now combine the terms.\": missing subject.",
+  ]);
+  await assert.rejects(() => reviewPedagogyNarration(parsed, async () => { throw new Error("reviewer unavailable"); }), PedagogyGrammarReviewError);
+});
+
+test("preview route no longer contains the old pedagogy-specific 503 preflight", async () => {
+  const routeSource = await readFile("src/app/api/question/pedagogy/preview/route.ts", "utf8");
+  assert.doesNotMatch(routeSource, /Pedagogy narration grammar review is not configured/);
+  assert.doesNotMatch(routeSource, /process\.env\.OPENAI_API_KEY/);
 });
 
 test("rejects duplicate line numbers and backward timestamps", () => {
