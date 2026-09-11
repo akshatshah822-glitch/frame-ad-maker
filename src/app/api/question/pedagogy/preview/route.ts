@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 import { PedagogyBriefValidationError, pedagogyWarnings, validatePedagogyRows } from "@/lib/pedagogy-brief";
 import { PedagogyGrammarReviewError, reviewPedagogyNarration } from "@/lib/pedagogy-narration";
+import { createPedagogyNarrationTracks, validatePedagogyNarrationTiming } from "@/lib/pedagogy-narration-duration";
 import { extractPedagogyRowsFromWorkbook } from "@/lib/pedagogy-workbook";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export const maxDuration = 300;
 export const runtime = "nodejs";
@@ -18,6 +22,13 @@ const post = async (request: Request) => {
   try {
     const rows = validatePedagogyRows(await worksheetRows(file));
     const grammarWarnings = await reviewPedagogyNarration(rows);
+    const directory = await mkdtemp(join(tmpdir(), "frame-pedagogy-preview-"));
+    try {
+      const { narrationDurations } = await createPedagogyNarrationTracks(rows, directory);
+      validatePedagogyNarrationTiming(rows, narrationDurations);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
     const warnings = pedagogyWarnings(rows);
     warnings.forEach((warning) => console.warn("Pedagogy brief warning", warning));
     grammarWarnings.forEach((warning) => console.warn("Pedagogy grammar warning", warning));

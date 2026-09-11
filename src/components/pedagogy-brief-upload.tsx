@@ -67,7 +67,7 @@ export function PedagogyBriefUpload() {
     </div>
     {mode === "manual" ? <section className="pedagogy-manual" role="tabpanel"><p className="eyebrow">Existing route</p><h2>Manual question generation stays available.</h2><p>This upload path does not replace or change the existing manual `POST /api/question/generate` and `POST /api/question/render` workflow.</p></section> : <section className="pedagogy-upload" role="tabpanel">
       <div className="pedagogy-upload-heading"><div><p className="eyebrow">Step 1</p><h2>Upload the teaching plan.</h2></div><p>First worksheet only. Required: question_id, line_no, time, sir_ka_vaakya, board. Optional: emphasis, pause_after.</p></div>
-      <label className="pedagogy-file-picker"><span>Choose .xlsx file</span><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={uploadBrief} /><b>{isReviewing ? "Reviewing timing and grammar…" : fileName || "No file selected"}</b></label>
+      <label className="pedagogy-file-picker"><span>Choose .xlsx file</span><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={uploadBrief} /><b>{isReviewing ? "Reviewing grammar and narration timing…" : fileName || "No file selected"}</b></label>
       {error ? <p className="error" role="alert">{error}</p> : null}
       {warnings.length ? <section className="pedagogy-warnings" aria-label="Brief warnings"><strong>Review warnings</strong><ul>{warnings.map((warning, index) => <li key={`${index}-${warning}`}>{warning}</li>)}</ul></section> : null}
       {rows.length ? <>

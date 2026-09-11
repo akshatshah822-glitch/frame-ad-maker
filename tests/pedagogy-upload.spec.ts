@@ -18,9 +18,13 @@ test("pedagogy upload previews normalized rows while the manual API remains avai
   page.on("console", (message) => {
     if (message.text().includes("Encountered two children with the same key")) duplicateKeyWarnings.push(message.text());
   });
-  await page.route("**/api/question/pedagogy/preview", (route) => route.fulfill({ json: preview }));
+  await page.route("**/api/question/pedagogy/preview", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await route.fulfill({ json: preview });
+  });
   await page.goto("/question");
   await page.setInputFiles('input[type="file"]', { name: "pedagogy-three-rows.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("test workbook") });
+  await expect(page.getByText("Reviewing grammar and narration timing…")).toBeVisible();
   await expect(page.getByText("Check the teaching timeline.")).toBeVisible();
   await expect(page.getByText("First source timestamp 3:54 maps to video time 0:00.")).toBeVisible();
   await expect(page.getByRole("cell", { name: "0:00" })).toBeVisible();

@@ -7,6 +7,7 @@ import { createPedagogySlide } from "../src/lib/pedagogy-slide";
 import { PedagogyGrammarReviewError, reviewPedagogyNarration } from "../src/lib/pedagogy-narration";
 import { extractPedagogyRowsFromWorkbook } from "../src/lib/pedagogy-workbook";
 import { renderValidationFailure } from "../src/app/api/question/pedagogy/render/route";
+import { validatePedagogyNarrationTiming } from "../src/lib/pedagogy-narration-duration";
 
 const rows = [
   { sourceRow: 2, questionId: "Q-20", lineNo: "1", time: "3:54", narration: "Read the expression carefully.", board: "x + y", emphasis: "x", pauseAfter: "" },
@@ -82,4 +83,15 @@ test("returns a pedagogy render 422 with timing diagnostics", async () => {
     code: "NARRATION_TIMING_OVERFLOW",
     sourceRow: 42,
   });
+});
+
+test("detects narration timing overflow before rendering", () => {
+  const parsed = validatePedagogyRows([
+    { ...rows[0], time: "3:54" },
+    { ...rows[1], time: "4:00" },
+  ]);
+  assert.throws(
+    () => validatePedagogyNarrationTiming(parsed, [6.5, 1]),
+    /Row 2: available duration 6.000 seconds; required narration duration 6.500 seconds/,
+  );
 });
