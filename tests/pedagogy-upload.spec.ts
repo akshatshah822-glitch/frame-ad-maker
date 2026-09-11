@@ -15,6 +15,7 @@ test("pedagogy upload previews normalized rows while the manual API remains avai
   await page.goto("/question");
   await page.setInputFiles('input[type="file"]', { name: "pedagogy-three-rows.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("test workbook") });
   await expect(page.getByText("Check the teaching timeline.")).toBeVisible();
+  await expect(page.getByText("First source timestamp 3:54 maps to video time 0:00.")).toBeVisible();
   await expect(page.getByRole("cell", { name: "0:00" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "x + y" }).first()).toBeVisible();
   await expect(page.getByText(/Row 3: emphasis/)).toBeVisible();
