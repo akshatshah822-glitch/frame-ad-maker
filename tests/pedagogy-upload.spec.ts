@@ -7,10 +7,17 @@ const preview = {
     { sourceRow: 4, questionId: "Q-20", lineNo: 3, sourceTime: "4:13", generatedTimeLabel: "0:19", narration: "The answer is x plus y.", board: "Answer: x + y", effectiveBoard: "Answer: x + y", emphasis: "x + y", pauseAfter: "nahi" },
   ],
   warnings: ["Row 3: emphasis \"missing\" does not exist on the current board; no highlight was added."],
-  grammarWarnings: [],
+  grammarWarnings: [
+    "Row 121: grammar warning: Sentence \"कारण है यह।\": missing subject.",
+    "Row 121: grammar warning: Sentence \"कारण है यह।\": missing subject.",
+  ],
 };
 
 test("pedagogy upload previews normalized rows while the manual API remains available", async ({ page }) => {
+  const duplicateKeyWarnings: string[] = [];
+  page.on("console", (message) => {
+    if (message.text().includes("Encountered two children with the same key")) duplicateKeyWarnings.push(message.text());
+  });
   await page.route("**/api/question/pedagogy/preview", (route) => route.fulfill({ json: preview }));
   await page.goto("/question");
   await page.setInputFiles('input[type="file"]', { name: "pedagogy-three-rows.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("test workbook") });
@@ -19,6 +26,8 @@ test("pedagogy upload previews normalized rows while the manual API remains avai
   await expect(page.getByRole("cell", { name: "0:00" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "x + y" }).first()).toBeVisible();
   await expect(page.getByText(/Row 3: emphasis/)).toBeVisible();
+  await expect(page.getByText('Row 121: grammar warning: Sentence "कारण है यह।": missing subject.')).toHaveCount(2);
+  expect(duplicateKeyWarnings).toEqual([]);
   await page.getByRole("tab", { name: "Manual question entry" }).click();
   await expect(page.getByText("Manual question generation stays available.")).toBeVisible();
   const manualRoute = await page.request.post("/api/question/generate", { data: {} });
