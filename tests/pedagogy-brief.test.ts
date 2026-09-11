@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import * as XLSX from "xlsx";
-import { assertNarrationFits, pedagogyWarnings, validatePedagogyRows } from "../src/lib/pedagogy-brief";
+import { assertNarrationFits, PedagogyBriefValidationError, pedagogyWarnings, validatePedagogyRows } from "../src/lib/pedagogy-brief";
 import { createPedagogySlide } from "../src/lib/pedagogy-slide";
 import { PedagogyGrammarReviewError, reviewPedagogyNarration } from "../src/lib/pedagogy-narration";
 import { extractPedagogyRowsFromWorkbook } from "../src/lib/pedagogy-workbook";
+import { renderValidationFailure } from "../src/app/api/question/pedagogy/render/route";
 
 const rows = [
   { sourceRow: 2, questionId: "Q-20", lineNo: "1", time: "3:54", narration: "Read the expression carefully.", board: "x + y", emphasis: "x", pauseAfter: "" },
@@ -69,6 +70,16 @@ test("rejects duplicate line numbers and backward timestamps", () => {
   assert.throws(() => validatePedagogyRows([{ ...rows[0], lineNo: "1", time: "4:00" }, { ...rows[1], lineNo: "2", time: "3:54" }]), /moves backwards/);
 });
 
-test("reports a timing error with row and both durations", () => {
-  assert.throws(() => assertNarrationFits(4, 2, 2.4), /Row 4: available duration 2.000 seconds; required narration duration 2.400 seconds/);
+test("returns a pedagogy render 422 with timing diagnostics", async () => {
+  let validationError: unknown;
+  try { assertNarrationFits(42, 6, 8.4); } catch (error) { validationError = error; }
+  assert.ok(validationError instanceof Error);
+  assert.ok(validationError instanceof PedagogyBriefValidationError);
+  const response = renderValidationFailure(validationError);
+  assert.equal(response.status, 422);
+  assert.deepEqual(await response.json(), {
+    error: "Row 42: available duration 6.000 seconds; required narration duration 8.400 seconds.",
+    code: "NARRATION_TIMING_OVERFLOW",
+    sourceRow: 42,
+  });
 });

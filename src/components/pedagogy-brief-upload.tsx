@@ -5,6 +5,7 @@ import { readJsonResponse } from "@/lib/read-json-response";
 
 type PedagogyRow = { sourceRow: number; questionId: string; lineNo: number; sourceTime: string; generatedTimeLabel: string; narration: string; board: string; effectiveBoard: string; emphasis: string; pauseAfter: "haan" | "nahi" };
 type PreviewResponse = { rows?: PedagogyRow[]; warnings?: string[]; grammarWarnings?: string[]; error?: string };
+type RenderErrorResponse = { error?: string; code?: string; sourceRow?: number | null };
 
 export function PedagogyBriefUpload() {
   const [mode, setMode] = useState<"manual" | "pedagogy">("pedagogy");
@@ -41,8 +42,16 @@ export function PedagogyBriefUpload() {
     try {
       const response = await fetch("/api/question/pedagogy/render", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }) });
       if (!response.ok) {
-        const result = await readJsonResponse<PreviewResponse>(response);
-        throw new Error(result?.error || "The pedagogy video could not be generated.");
+        let result: RenderErrorResponse;
+        try {
+          result = await readJsonResponse<RenderErrorResponse>(response);
+        } catch (reason) {
+          if (response.status === 422) throw new Error("Render failed with HTTP 422, but the server returned no diagnostic details.");
+          throw reason;
+        }
+        if (result.error) throw new Error(result.error);
+        if (response.status === 422) throw new Error("Render failed with HTTP 422, but the server returned no diagnostic details.");
+        throw new Error("The pedagogy video could not be generated.");
       }
       const url = URL.createObjectURL(await response.blob());
       if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);

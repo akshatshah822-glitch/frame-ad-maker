@@ -33,3 +33,25 @@ test("pedagogy upload previews normalized rows while the manual API remains avai
   const manualRoute = await page.request.post("/api/question/generate", { data: {} });
   expect(manualRoute.status()).toBe(400);
 });
+
+test("displays the exact pedagogy render 422 diagnostic", async ({ page }) => {
+  await page.route("**/api/question/pedagogy/preview", (route) => route.fulfill({ json: preview }));
+  await page.route("**/api/question/pedagogy/render", (route) => route.fulfill({ status: 422, json: {
+    error: "Row 42: available duration 6.000 seconds; required narration duration 8.400 seconds.",
+    code: "NARRATION_TIMING_OVERFLOW",
+    sourceRow: 42,
+  } }));
+  await page.goto("/question");
+  await page.setInputFiles('input[type="file"]', { name: "pedagogy-three-rows.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("test workbook") });
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await expect(page.locator("p.error[role=alert]")).toHaveText("Row 42: available duration 6.000 seconds; required narration duration 8.400 seconds.");
+});
+
+test("uses the required fallback when a pedagogy render 422 has no JSON diagnostic", async ({ page }) => {
+  await page.route("**/api/question/pedagogy/preview", (route) => route.fulfill({ json: preview }));
+  await page.route("**/api/question/pedagogy/render", (route) => route.fulfill({ status: 422, body: "" }));
+  await page.goto("/question");
+  await page.setInputFiles('input[type="file"]', { name: "pedagogy-three-rows.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("test workbook") });
+  await page.getByRole("button", { name: "Generate video" }).click();
+  await expect(page.locator("p.error[role=alert]")).toHaveText("Render failed with HTTP 422, but the server returned no diagnostic details.");
+});

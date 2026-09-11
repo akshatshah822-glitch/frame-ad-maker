@@ -27,14 +27,21 @@ export type PedagogyRow = {
 };
 
 export class PedagogyBriefValidationError extends Error {
-  constructor(message: string) {
+  readonly code: "PEDAGOGY_BRIEF_VALIDATION" | "NARRATION_TIMING_OVERFLOW";
+  readonly sourceRow: number | null;
+  readonly safeReason: string;
+
+  constructor(message: string, options: { code?: "PEDAGOGY_BRIEF_VALIDATION" | "NARRATION_TIMING_OVERFLOW"; sourceRow?: number; safeReason?: string } = {}) {
     super(message);
     this.name = "PedagogyBriefValidationError";
+    this.code = options.code ?? "PEDAGOGY_BRIEF_VALIDATION";
+    this.sourceRow = options.sourceRow ?? null;
+    this.safeReason = options.safeReason ?? "Pedagogy render validation failed.";
   }
 }
 
 function rowError(sourceRow: number, message: string) {
-  return new PedagogyBriefValidationError(`Row ${sourceRow}: ${message}`);
+  return new PedagogyBriefValidationError(`Row ${sourceRow}: ${message}`, { sourceRow });
 }
 
 function valueAsText(value: unknown) {
@@ -119,6 +126,7 @@ export function pedagogyWarnings(rows: PedagogyRow[]) {
 
 export function assertNarrationFits(rowNumber: number, availableDuration: number, narrationDuration: number) {
   if (narrationDuration > availableDuration + 0.05) {
-    throw new PedagogyBriefValidationError(`Row ${rowNumber}: available duration ${availableDuration.toFixed(3)} seconds; required narration duration ${narrationDuration.toFixed(3)} seconds.`);
+    const message = `Row ${rowNumber}: available duration ${availableDuration.toFixed(3)} seconds; required narration duration ${narrationDuration.toFixed(3)} seconds.`;
+    throw new PedagogyBriefValidationError(message, { code: "NARRATION_TIMING_OVERFLOW", sourceRow: rowNumber, safeReason: message });
   }
 }

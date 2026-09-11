@@ -7,6 +7,12 @@ import { renderPedagogyVideo } from "@/lib/pedagogy-video";
 export const maxDuration = 300;
 export const runtime = "nodejs";
 
+export function renderValidationFailure(error: PedagogyBriefValidationError) {
+  const diagnostic = { error: error.message, code: error.code, sourceRow: error.sourceRow };
+  console.error("Pedagogy render validation failed", { code: error.code, sourceRow: error.sourceRow, reason: error.safeReason });
+  return NextResponse.json(diagnostic, { status: 422 });
+}
+
 function suppliedRows(value: unknown): PedagogyBriefInputRow[] {
   if (!Array.isArray(value)) throw new PedagogyBriefValidationError("A reviewed pedagogy brief is required.");
   return value.map((entry) => {
@@ -38,7 +44,7 @@ const post = async (request: Request) => {
       },
     });
   } catch (error) {
-    if (error instanceof PedagogyBriefValidationError) return NextResponse.json({ error: error.message }, { status: 422 });
+    if (error instanceof PedagogyBriefValidationError) return renderValidationFailure(error);
     throw error;
   }
 };
