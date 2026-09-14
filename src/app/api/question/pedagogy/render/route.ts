@@ -5,7 +5,7 @@ import { PedagogyNarrationMeasurementError } from "@/lib/pedagogy-narration-dura
 import { validateQuestionNarrationGrammar } from "@/lib/question-narration";
 import { renderPedagogyVideo } from "@/lib/pedagogy-video";
 
-export const maxDuration = 900;
+export const maxDuration = 300;
 export const runtime = "nodejs";
 
 export function renderValidationFailure(error: PedagogyBriefValidationError) {

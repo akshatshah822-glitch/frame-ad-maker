@@ -9,7 +9,7 @@ import { createPedagogyNarrationTracks, PedagogyNarrationMeasurementError } from
 import { encodePedagogyPreviewEvent } from "@/lib/pedagogy-preview-stream";
 import { extractPedagogyRowsFromWorkbook } from "@/lib/pedagogy-workbook";
 
-export const maxDuration = 900;
+export const maxDuration = 300;
 export const runtime = "nodejs";
 
 function worksheetRows(file: File) {
