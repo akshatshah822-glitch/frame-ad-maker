@@ -9,6 +9,9 @@ export type PedagogySlideState = {
 
 type BoardSegment = { text: string; emphasized: boolean };
 type BoardLine = BoardSegment[];
+export type PedagogyBoardLayout = { lines: string[]; size: number; lineHeight: number };
+
+const boardTextWidthCache = new Map<string, Promise<number>>();
 
 function escapeXml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
@@ -31,45 +34,65 @@ function boardTokens(board: string, emphasis: string): BoardSegment[] {
   return tokens;
 }
 
-function boardLines(board: string, emphasis: string, maximumCharacters: number): BoardLine[] {
+async function renderedTextWidth(text: string, size: number) {
+  const key = `${size}\u0000${text}`;
+  let width = boardTextWidthCache.get(key);
+  if (!width) {
+    width = sharp({ text: { text, font: `Arial Bold ${size}`, rgba: true } })
+      .png()
+      .toBuffer({ resolveWithObject: true })
+      .then(({ info }) => info.width);
+    boardTextWidthCache.set(key, width);
+  }
+  return width;
+}
+
+function lineText(line: BoardLine) {
+  return line.map((segment) => segment.text).join("");
+}
+
+async function boardLines(board: string, emphasis: string, maximumWidth: number, size: number): Promise<BoardLine[]> {
   const lines: BoardLine[] = [[]];
-  let characters = 0;
   for (const token of boardTokens(board, emphasis)) {
     const isWhitespace = /^\s+$/.test(token.text);
-    if (!isWhitespace && characters && characters + token.text.length > maximumCharacters) {
+    const currentLine = lines.at(-1)!;
+    if (!isWhitespace && currentLine.length && await renderedTextWidth(`${lineText(currentLine)}${token.text}`, size) > maximumWidth) {
+      while (/^\s+$/.test(currentLine.at(-1)?.text ?? "")) currentLine.pop();
       lines.push([]);
-      characters = 0;
     }
-    if (isWhitespace && !characters) continue;
+    if (isWhitespace && !lines.at(-1)?.length) continue;
     lines.at(-1)?.push(token);
-    characters += token.text.length;
   }
   return lines.filter((line) => line.length);
 }
 
-function fitBoard(board: string, emphasis: string) {
+async function fitBoard(board: string, emphasis: string) {
   if (!board) return { lines: [] as BoardLine[], size: 48, lineHeight: 60 };
   for (let size = 64; size >= 24; size -= 2) {
     const lineHeight = Math.ceil(size * 1.35);
-    const maximumCharacters = Math.max(1, Math.floor(1450 / (size * 0.59)));
-    const lines = boardLines(board, emphasis, maximumCharacters);
+    const lines = await boardLines(board, emphasis, 1450, size);
     if (lines.length * lineHeight <= 650) return { lines, size, lineHeight };
   }
   throw new Error("Invalid board: does not fit on the fixed slide at the minimum readable size.");
 }
 
 function textLine(line: BoardLine, x: number, y: number, size: number) {
-  const spans = line.map((segment) => `<tspan${segment.emphasized ? ' fill="#ff5c46" text-decoration="underline" text-decoration-thickness="3"' : ""}>${escapeXml(segment.text)}</tspan>`).join("");
-  return `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="${size}" font-weight="700" fill="#f5f7f8">${spans}</text>`;
+  const spans = line.map((segment) => `<tspan xml:space="preserve"${segment.emphasized ? ' fill="#ff5c46" text-decoration="underline" text-decoration-thickness="3"' : ""}>${escapeXml(segment.text)}</tspan>`).join("");
+  return `<text xml:space="preserve" x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="${size}" font-weight="700" fill="#f5f7f8">${spans}</text>`;
 }
 
-export async function createPedagogySlide(state: PedagogySlideState) {
+export async function wrapPedagogyBoardText(board: string, emphasis = ""): Promise<PedagogyBoardLayout> {
+  const layout = await fitBoard(board, emphasis);
+  return { lines: layout.lines.map(lineText), size: layout.size, lineHeight: layout.lineHeight };
+}
+
+export async function createPedagogySlideSvg(state: PedagogySlideState) {
   const width = 1920;
   const height = 1080;
-  const layout = fitBoard(state.board, state.emphasis);
+  const layout = await fitBoard(state.board, state.emphasis);
   const firstLineY = 290 + Math.max(0, (650 - layout.lines.length * layout.lineHeight) / 2) + layout.lineHeight;
   const boardText = layout.lines.map((line, index) => textLine(line, 230, firstLineY + index * layout.lineHeight, layout.size)).join("");
-  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+  return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="1920" height="1080" fill="#101b36"/>
     <rect x="0" y="0" width="1920" height="20" fill="#ff5c46"/>
     <rect x="120" y="160" width="1680" height="760" rx="28" fill="#17233e" stroke="#52617f" stroke-width="3"/>
@@ -79,5 +102,8 @@ export async function createPedagogySlide(state: PedagogySlideState) {
     ${boardText}
     <text x="150" y="1015" font-family="Arial, sans-serif" font-size="23" font-weight="800" letter-spacing="4" fill="#9eabc3">FRAME / PEDAGOGY BRIEF</text>
   </svg>`;
-  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+export async function createPedagogySlide(state: PedagogySlideState) {
+  return sharp(Buffer.from(await createPedagogySlideSvg(state))).png().toBuffer();
 }
