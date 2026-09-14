@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "pedagogy:render-local": "tsx scripts/render-pedagogy-local.ts",
     "lint": "eslint",
     "test:e2e": "playwright test"
   },
