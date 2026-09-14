@@ -3,7 +3,7 @@ import sharp from "sharp";
 export type PedagogySlideState = {
   questionId: string;
   questionText?: string;
-  options?: [string, string, string, string];
+  options?: [string, string, string, string, string];
   board: string;
   emphasis: string;
   generatedTimeLabel: string;
@@ -90,14 +90,14 @@ async function fitSolutionBoard(board: string, emphasis: string) {
 
 type QuestionPanelLine = { line: BoardLine; optionLabel?: string };
 
-async function fitQuestionPanel(questionText: string, options: [string, string, string, string]) {
+async function fitQuestionPanel(questionText: string, options: [string, string, string, string, string]) {
   for (let size = 38; size >= 18; size -= 2) {
     const lineHeight = Math.ceil(size * 1.3);
     const questionLines = await boardLines(questionText, "", 1450, size);
     const optionLines = await Promise.all(options.map((option) => option.trim() ? boardLines(option, "", 1360, size) : Promise.resolve([] as BoardLine[])));
     const lines: QuestionPanelLine[] = [
       ...questionLines.map((line) => ({ line })),
-      ...optionLines.flatMap((linesForOption, optionIndex) => linesForOption.map((line, lineIndex) => ({ line, optionLabel: lineIndex === 0 ? `${"ABCD"[optionIndex]}.` : undefined }))),
+      ...optionLines.flatMap((linesForOption, optionIndex) => linesForOption.map((line, lineIndex) => ({ line, optionLabel: lineIndex === 0 ? `${"ABCDE"[optionIndex]}.` : undefined }))),
     ];
     if (lines.length * lineHeight <= 218) return { lines, size, lineHeight };
   }
@@ -118,7 +118,7 @@ export async function createPedagogySlideSvg(state: PedagogySlideState) {
   const width = 1920;
   const height = 1080;
   if (state.questionText?.trim()) {
-    const question = await fitQuestionPanel(state.questionText, state.options ?? ["", "", "", ""]);
+    const question = await fitQuestionPanel(state.questionText, state.options ?? ["", "", "", "", ""]);
     const solution = await fitSolutionBoard(state.board, state.emphasis);
     const firstQuestionLineY = 240 + Math.max(0, (218 - question.lines.length * question.lineHeight) / 2) + question.lineHeight;
     const questionText = question.lines.map(({ line, optionLabel }, index) => `${optionLabel ? `<text x="230" y="${firstQuestionLineY + index * question.lineHeight}" font-family="Arial, sans-serif" font-size="${question.size}" font-weight="800" fill="#ff5c46">${optionLabel}</text>` : ""}${textLine(line, optionLabel ? 310 : 230, firstQuestionLineY + index * question.lineHeight, question.size)}`).join("");

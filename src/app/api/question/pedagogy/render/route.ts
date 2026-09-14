@@ -29,7 +29,7 @@ function suppliedRows(value: unknown): PedagogyBriefInputRow[] {
     return {
       sourceRow: Number(row.sourceRow), questionId: row.questionId, lineNo: row.lineNo, time: row.sourceTime,
       narration: row.narration, board: row.board, emphasis: row.emphasis, pauseAfter: row.pauseAfter,
-      questionText: row.questionText, optionA: options[0], optionB: options[1], optionC: options[2], optionD: options[3],
+      questionText: row.questionText, optionA: options[0], optionB: options[1], optionC: options[2], optionD: options[3], optionE: options[4],
     };
   });
 }

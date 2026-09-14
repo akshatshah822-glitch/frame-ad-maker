@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 
 const preview = {
   rows: [
-    { sourceRow: 2, questionId: "Q-20", lineNo: 1, sourceTime: "3:54", generatedTimeLabel: "0:00", narration: "Read the expression carefully.", board: "x + y", effectiveBoard: "x + y", emphasis: "x", pauseAfter: "nahi", questionText: "Which value is correct?", options: ["One", "Two", "Three", "Four"], effectiveQuestionText: "Which value is correct?", effectiveOptions: ["One", "Two", "Three", "Four"] },
-    { sourceRow: 3, questionId: "Q-20", lineNo: 2, sourceTime: "4:00", generatedTimeLabel: "0:06", narration: "We now combine the terms.", board: "", effectiveBoard: "x + y", emphasis: "missing", pauseAfter: "haan", questionText: "", options: ["", "", "", ""], effectiveQuestionText: "Which value is correct?", effectiveOptions: ["One", "Two", "Three", "Four"] },
-    { sourceRow: 4, questionId: "Q-20", lineNo: 3, sourceTime: "4:13", generatedTimeLabel: "0:19", narration: "The answer is x plus y.", board: "Answer: x + y", effectiveBoard: "Answer: x + y", emphasis: "x + y", pauseAfter: "nahi", questionText: "", options: ["", "", "", ""], effectiveQuestionText: "Which value is correct?", effectiveOptions: ["One", "Two", "Three", "Four"] },
+    { sourceRow: 2, questionId: "Q-20", lineNo: 1, sourceTime: "3:54", generatedTimeLabel: "0:00", narration: "Read the expression carefully.", board: "x + y", effectiveBoard: "x + y", emphasis: "x", pauseAfter: "nahi", questionText: "Which value is correct?", options: ["One", "Two", "Three", "Four", "Five"], effectiveQuestionText: "Which value is correct?", effectiveOptions: ["One", "Two", "Three", "Four", "Five"] },
+    { sourceRow: 3, questionId: "Q-20", lineNo: 2, sourceTime: "4:00", generatedTimeLabel: "0:06", narration: "We now combine the terms.", board: "", effectiveBoard: "x + y", emphasis: "missing", pauseAfter: "haan", questionText: "", options: ["", "", "", "", ""], effectiveQuestionText: "Which value is correct?", effectiveOptions: ["One", "Two", "Three", "Four", "Five"] },
+    { sourceRow: 4, questionId: "Q-20", lineNo: 3, sourceTime: "4:13", generatedTimeLabel: "0:19", narration: "The answer is x plus y.", board: "Answer: x + y", effectiveBoard: "Answer: x + y", emphasis: "x + y", pauseAfter: "nahi", questionText: "", options: ["", "", "", "", ""], effectiveQuestionText: "Which value is correct?", effectiveOptions: ["One", "Two", "Three", "Four", "Five"] },
   ],
   warnings: ["Row 3: emphasis \"missing\" does not exist on the current board; no highlight was added."],
   grammarWarnings: [

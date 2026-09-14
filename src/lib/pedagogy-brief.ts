@@ -14,6 +14,7 @@ export type PedagogyBriefInputRow = {
   optionB?: unknown;
   optionC?: unknown;
   optionD?: unknown;
+  optionE?: unknown;
 };
 
 export type PedagogyRow = {
@@ -30,9 +31,9 @@ export type PedagogyRow = {
   emphasis: string;
   pauseAfter: "haan" | "nahi";
   questionText: string;
-  options: [string, string, string, string];
+  options: [string, string, string, string, string];
   effectiveQuestionText: string;
-  effectiveOptions: [string, string, string, string];
+  effectiveOptions: [string, string, string, string, string];
 };
 
 export type PedagogyTimingAuditRow = {
@@ -135,7 +136,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       emphasis: valueAsText(input.emphasis),
       pauseAfter: parsePause(input.pauseAfter, sourceRow),
       questionText: valueAsText(input.questionText),
-      options: [valueAsText(input.optionA), valueAsText(input.optionB), valueAsText(input.optionC), valueAsText(input.optionD)] as [string, string, string, string],
+      options: [valueAsText(input.optionA), valueAsText(input.optionB), valueAsText(input.optionC), valueAsText(input.optionD), valueAsText(input.optionE)] as [string, string, string, string, string],
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
@@ -143,7 +144,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let previousTime: number | undefined;
   let retainedBoard = "";
   let retainedQuestionText = "";
-  let retainedOptions: [string, string, string, string] = ["", "", "", ""];
+  let retainedOptions: [string, string, string, string, string] = ["", "", "", "", ""];
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
