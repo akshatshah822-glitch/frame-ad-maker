@@ -26,12 +26,37 @@ export type PedagogyRow = {
   pauseAfter: "haan" | "nahi";
 };
 
+export type PedagogyTimingAuditRow = {
+  sourceRow: number;
+  sourceTime: string;
+  originalGeneratedTime: number;
+  originalGeneratedTimeLabel: string;
+  adjustedGeneratedTime: number;
+  adjustedGeneratedTimeLabel: string;
+  originalAvailableDuration: number | null;
+  narrationDuration: number;
+  allocatedDuration: number;
+  addedDuration: number;
+};
+
+export type AdjustedPedagogyRow = PedagogyRow & {
+  adjustedGeneratedTime: number;
+  adjustedGeneratedTimeLabel: string;
+  allocatedDuration: number;
+};
+
+export type AdjustedPedagogyTimeline = {
+  rows: AdjustedPedagogyRow[];
+  audit: PedagogyTimingAuditRow[];
+  totalDuration: number;
+};
+
 export class PedagogyBriefValidationError extends Error {
-  readonly code: "PEDAGOGY_BRIEF_VALIDATION" | "NARRATION_TIMING_OVERFLOW";
+  readonly code: "PEDAGOGY_BRIEF_VALIDATION";
   readonly sourceRow: number | null;
   readonly safeReason: string;
 
-  constructor(message: string, options: { code?: "PEDAGOGY_BRIEF_VALIDATION" | "NARRATION_TIMING_OVERFLOW"; sourceRow?: number; safeReason?: string } = {}) {
+  constructor(message: string, options: { code?: "PEDAGOGY_BRIEF_VALIDATION"; sourceRow?: number; safeReason?: string } = {}) {
     super(message);
     this.name = "PedagogyBriefValidationError";
     this.code = options.code ?? "PEDAGOGY_BRIEF_VALIDATION";
@@ -124,9 +149,39 @@ export function pedagogyWarnings(rows: PedagogyRow[]) {
     : []);
 }
 
-export function assertNarrationFits(rowNumber: number, availableDuration: number, narrationDuration: number) {
-  if (narrationDuration > availableDuration + 0.05) {
-    const message = `Row ${rowNumber}: available duration ${availableDuration.toFixed(3)} seconds; required narration duration ${narrationDuration.toFixed(3)} seconds.`;
-    throw new PedagogyBriefValidationError(message, { code: "NARRATION_TIMING_OVERFLOW", sourceRow: rowNumber, safeReason: message });
-  }
+export function buildAdjustedPedagogyTimeline(rows: PedagogyRow[], narrationDurations: number[]): AdjustedPedagogyTimeline {
+  if (rows.length !== narrationDurations.length) throw new PedagogyBriefValidationError("Every pedagogy row needs one measured narration duration.");
+  let adjustedGeneratedTime = 0;
+  const audit = rows.map((row, index) => {
+    const narrationDuration = narrationDurations[index];
+    if (!Number.isFinite(narrationDuration) || narrationDuration <= 0) throw new PedagogyBriefValidationError("Pedagogy narration duration must be a positive number.", { sourceRow: row.sourceRow });
+    const originalAvailableDuration = index === rows.length - 1 ? null : rows[index + 1].generatedTime - row.generatedTime;
+    const allocatedDuration = originalAvailableDuration === null
+      ? narrationDuration + 0.5
+      : Math.max(originalAvailableDuration, narrationDuration + 0.5);
+    const auditRow = {
+      sourceRow: row.sourceRow,
+      sourceTime: row.sourceTime,
+      originalGeneratedTime: row.generatedTime,
+      originalGeneratedTimeLabel: row.generatedTimeLabel,
+      adjustedGeneratedTime,
+      adjustedGeneratedTimeLabel: formatPedagogyTime(adjustedGeneratedTime),
+      originalAvailableDuration,
+      narrationDuration,
+      allocatedDuration,
+      addedDuration: originalAvailableDuration === null ? 0 : allocatedDuration - originalAvailableDuration,
+    } satisfies PedagogyTimingAuditRow;
+    adjustedGeneratedTime += allocatedDuration;
+    return auditRow;
+  });
+  return {
+    rows: rows.map((row, index) => ({
+      ...row,
+      adjustedGeneratedTime: audit[index].adjustedGeneratedTime,
+      adjustedGeneratedTimeLabel: audit[index].adjustedGeneratedTimeLabel,
+      allocatedDuration: audit[index].allocatedDuration,
+    })),
+    audit,
+    totalDuration: adjustedGeneratedTime,
+  };
 }

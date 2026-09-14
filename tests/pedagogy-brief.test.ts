@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import * as XLSX from "xlsx";
-import { assertNarrationFits, PedagogyBriefValidationError, pedagogyWarnings, validatePedagogyRows } from "../src/lib/pedagogy-brief";
+import { buildAdjustedPedagogyTimeline, pedagogyWarnings, validatePedagogyRows } from "../src/lib/pedagogy-brief";
 import { createPedagogySlide } from "../src/lib/pedagogy-slide";
 import { PedagogyGrammarReviewError, reviewPedagogyNarration } from "../src/lib/pedagogy-narration";
 import { extractPedagogyRowsFromWorkbook } from "../src/lib/pedagogy-workbook";
-import { renderValidationFailure } from "../src/app/api/question/pedagogy/render/route";
-import { validatePedagogyNarrationTiming } from "../src/lib/pedagogy-narration-duration";
+import { encodePedagogyPreviewEvent, readPedagogyPreviewStream } from "../src/lib/pedagogy-preview-stream";
 
 const rows = [
   { sourceRow: 2, questionId: "Q-20", lineNo: "1", time: "3:54", narration: "Read the expression carefully.", board: "x + y", emphasis: "x", pauseAfter: "" },
@@ -71,27 +70,32 @@ test("rejects duplicate line numbers and backward timestamps", () => {
   assert.throws(() => validatePedagogyRows([{ ...rows[0], lineNo: "1", time: "4:00" }, { ...rows[1], lineNo: "2", time: "3:54" }]), /moves backwards/);
 });
 
-test("returns a pedagogy render 422 with timing diagnostics", async () => {
-  let validationError: unknown;
-  try { assertNarrationFits(42, 6, 8.4); } catch (error) { validationError = error; }
-  assert.ok(validationError instanceof Error);
-  assert.ok(validationError instanceof PedagogyBriefValidationError);
-  const response = renderValidationFailure(validationError);
-  assert.equal(response.status, 422);
-  assert.deepEqual(await response.json(), {
-    error: "Row 42: available duration 6.000 seconds; required narration duration 8.400 seconds.",
-    code: "NARRATION_TIMING_OVERFLOW",
-    sourceRow: 42,
-  });
+test("cascades an adjusted timeline after measuring every narration line", () => {
+  const parsed = validatePedagogyRows(rows);
+  const timeline = buildAdjustedPedagogyTimeline(parsed, [6.55, 7.56, 2]);
+  assert.equal(timeline.audit[0].originalAvailableDuration, 6);
+  assert.equal(timeline.audit[0].allocatedDuration, 7.05);
+  assert.ok(Math.abs(timeline.audit[0].addedDuration - 1.05) < 0.000001);
+  assert.equal(timeline.audit[1].adjustedGeneratedTime, 7.05);
+  assert.equal(timeline.audit[1].originalAvailableDuration, 13);
+  assert.equal(timeline.audit[1].allocatedDuration, 13);
+  assert.ok(Math.abs(timeline.audit[2].adjustedGeneratedTime - 20.05) < 0.000001);
+  assert.equal(timeline.audit[2].allocatedDuration, 2.5);
+  assert.ok(Math.abs(timeline.totalDuration - 22.55) < 0.000001);
 });
 
-test("detects narration timing overflow before rendering", () => {
-  const parsed = validatePedagogyRows([
-    { ...rows[0], time: "3:54" },
-    { ...rows[1], time: "4:00" },
-  ]);
-  assert.throws(
-    () => validatePedagogyNarrationTiming(parsed, [6.5, 1]),
-    /Row 2: available duration 6.000 seconds; required narration duration 6.500 seconds/,
-  );
+test("reads every streamed narration progress update before the preview result", async () => {
+  const parsed = validatePedagogyRows(rows);
+  const timeline = buildAdjustedPedagogyTimeline(parsed, [2, 2, 2]);
+  const response = new Response([
+    encodePedagogyPreviewEvent({ type: "progress", phase: "checking-grammar", completed: 0, total: 3 }),
+    encodePedagogyPreviewEvent({ type: "progress", phase: "measuring-narration", completed: 1, total: 3 }),
+    encodePedagogyPreviewEvent({ type: "progress", phase: "measuring-narration", completed: 2, total: 3 }),
+    encodePedagogyPreviewEvent({ type: "progress", phase: "measuring-narration", completed: 3, total: 3 }),
+    encodePedagogyPreviewEvent({ type: "result", result: { rows: parsed, warnings: [], grammarWarnings: [], timingAudit: timeline.audit } }),
+  ].join(""), { headers: { "Content-Type": "application/x-ndjson" } });
+  const progress: string[] = [];
+  const result = await readPedagogyPreviewStream(response, (event) => progress.push(`${event.phase}:${event.completed}/${event.total}`));
+  assert.deepEqual(progress, ["checking-grammar:0/3", "measuring-narration:1/3", "measuring-narration:2/3", "measuring-narration:3/3"]);
+  assert.equal(result.timingAudit?.length, 3);
 });
