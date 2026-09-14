@@ -50,3 +50,22 @@ test("wraps multi-line board text without joining words", async () => {
   assert.ok(layout.lines.length > 1);
   assert.ok(layout.lines.every((line) => line.includes(" ") || line === "predicate."));
 });
+
+test("shows a fixed question and its exact option text above the solution", async () => {
+  const questionText = "Which sentence has a complete thought?";
+  const options: [string, string, string, string] = ["Ram is playing.", "Because it rains.", "Under the tree.", "Very quickly."];
+  const svg = await createPedagogySlideSvg({ questionId: "ENG-1", questionText, options, board: "A complete thought needs a subject and predicate.", emphasis: "subject", generatedTimeLabel: "0:06" });
+  assert.match(svg, /QUESTION · ENG-1/);
+  assert.match(svg, /SOLUTION/);
+  assert.match(svg, /<tspan xml:space="preserve">Which<\/tspan><tspan xml:space="preserve"> <\/tspan><tspan xml:space="preserve">sentence<\/tspan>/);
+  assert.match(svg, /<tspan xml:space="preserve">thought\?<\/tspan>/);
+  assert.match(svg, /<tspan xml:space="preserve">Ram<\/tspan><tspan xml:space="preserve"> <\/tspan><tspan xml:space="preserve">is<\/tspan>/);
+  assert.match(svg, /<tspan xml:space="preserve">quickly\.<\/tspan>/);
+  assert.match(svg, /<tspan xml:space="preserve" fill="#ff5c46" text-decoration="underline" text-decoration-thickness="3">subject<\/tspan>/);
+});
+
+test("keeps the concept-only slide layout when no question is supplied", async () => {
+  const svg = await createPedagogySlideSvg({ questionId: "Q", board: "Concept remains unchanged.", emphasis: "", generatedTimeLabel: "0:00" });
+  assert.doesNotMatch(svg, />QUESTION</);
+  assert.doesNotMatch(svg, />SOLUTION</);
+});

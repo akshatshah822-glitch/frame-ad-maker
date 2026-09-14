@@ -22,12 +22,25 @@ test("normalizes the first timestamp and retains a blank board", () => {
   assert.deepEqual(pedagogyWarnings(parsed), ["Row 3: emphasis \"missing\" does not exist on the current board; no highlight was added."]);
 });
 
+test("keeps an optional question and its options visible on later blank rows", () => {
+  const parsed = validatePedagogyRows([
+    { ...rows[0], questionText: "Which value is correct?", optionA: "One", optionB: "Two", optionC: "Three", optionD: "Four" },
+    { ...rows[1], questionText: "", optionA: "", optionB: "", optionC: "", optionD: "" },
+  ]);
+  assert.equal(parsed[0].questionText, "Which value is correct?");
+  assert.deepEqual(parsed[0].options, ["One", "Two", "Three", "Four"]);
+  assert.equal(parsed[1].effectiveQuestionText, "Which value is correct?");
+  assert.deepEqual(parsed[1].effectiveOptions, ["One", "Two", "Three", "Four"]);
+});
+
 test("imports the first worksheet and preserves narration character-for-character", () => {
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows.map((row) => ({ question_id: row.questionId, line_no: row.lineNo, time: row.time, sir_ka_vaakya: row.narration, emphasis: row.emphasis, pause_after: row.pauseAfter, board: row.board }))), "Pedagogy");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows.map((row, index) => ({ question_id: row.questionId, line_no: row.lineNo, time: row.time, sir_ka_vaakya: row.narration, emphasis: row.emphasis, pause_after: row.pauseAfter, board: row.board, question_text: index === 0 ? "Which value is correct?" : "", option_a: index === 0 ? "One" : "", option_b: index === 0 ? "Two" : "", option_c: index === 0 ? "Three" : "", option_d: index === 0 ? "Four" : "" }))), "Pedagogy");
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["not", "the", "first", "sheet"]]), "Ignored");
   const imported = validatePedagogyRows(extractPedagogyRowsFromWorkbook(XLSX.write(workbook, { bookType: "xlsx", type: "array" })));
   assert.equal(imported[0].narration, rows[0].narration);
+  assert.equal(imported[1].effectiveQuestionText, "Which value is correct?");
+  assert.deepEqual(imported[1].effectiveOptions, ["One", "Two", "Three", "Four"]);
   assert.deepEqual(imported.map((row) => `${row.sourceTime} -> ${row.generatedTimeLabel}`), ["3:54 -> 0:00", "4:00 -> 0:06", "4:13 -> 0:19"]);
 });
 

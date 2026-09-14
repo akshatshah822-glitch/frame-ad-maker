@@ -9,6 +9,11 @@ export type PedagogyBriefInputRow = {
   board: unknown;
   emphasis?: unknown;
   pauseAfter?: unknown;
+  questionText?: unknown;
+  optionA?: unknown;
+  optionB?: unknown;
+  optionC?: unknown;
+  optionD?: unknown;
 };
 
 export type PedagogyRow = {
@@ -24,6 +29,10 @@ export type PedagogyRow = {
   effectiveBoard: string;
   emphasis: string;
   pauseAfter: "haan" | "nahi";
+  questionText: string;
+  options: [string, string, string, string];
+  effectiveQuestionText: string;
+  effectiveOptions: [string, string, string, string];
 };
 
 export type PedagogyTimingAuditRow = {
@@ -125,12 +134,16 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       board: valueAsText(input.board),
       emphasis: valueAsText(input.emphasis),
       pauseAfter: parsePause(input.pauseAfter, sourceRow),
+      questionText: valueAsText(input.questionText),
+      options: [valueAsText(input.optionA), valueAsText(input.optionB), valueAsText(input.optionC), valueAsText(input.optionD)] as [string, string, string, string],
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
   let previousLineNo: number | undefined;
   let previousTime: number | undefined;
   let retainedBoard = "";
+  let retainedQuestionText = "";
+  let retainedOptions: [string, string, string, string] = ["", "", "", ""];
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -138,8 +151,12 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     previousLineNo = row.lineNo;
     previousTime = row.sourceSeconds;
     if (row.board.trim()) retainedBoard = row.board;
+    if (row.questionText.trim()) {
+      retainedQuestionText = row.questionText;
+      retainedOptions = row.options;
+    }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    return { ...row, effectiveBoard: retainedBoard, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    return { ...row, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 

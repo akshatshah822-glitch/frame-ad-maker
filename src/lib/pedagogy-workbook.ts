@@ -20,5 +20,10 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     board: row.board,
     emphasis: row.emphasis,
     pauseAfter: row.pause_after,
+    questionText: row.question_text,
+    optionA: row.option_a,
+    optionB: row.option_b,
+    optionC: row.option_c,
+    optionD: row.option_d,
   } satisfies PedagogyBriefInputRow));
 }
