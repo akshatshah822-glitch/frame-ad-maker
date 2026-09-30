@@ -58,6 +58,11 @@ async function boardLines(board: string, emphasis: string, maximumWidth: number,
   for (const token of boardTokens(board, emphasis)) {
     const isWhitespace = /^\s+$/.test(token.text);
     const currentLine = lines.at(-1)!;
+    if (isWhitespace && token.text.includes("\n")) {
+      while (/^\s+$/.test(currentLine.at(-1)?.text ?? "")) currentLine.pop();
+      lines.push([]);
+      continue;
+    }
     if (!isWhitespace && currentLine.length && await renderedTextWidth(`${lineText(currentLine)}${token.text}`, size) > maximumWidth) {
       while (/^\s+$/.test(currentLine.at(-1)?.text ?? "")) currentLine.pop();
       lines.push([]);

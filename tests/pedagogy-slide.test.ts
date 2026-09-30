@@ -71,3 +71,22 @@ test("keeps the concept-only slide layout when no question is supplied", async (
   assert.doesNotMatch(svg, />QUESTION</);
   assert.doesNotMatch(svg, />SOLUTION</);
 });
+
+const multiLineBoard = "5 : 2\n7 parts = 56\n1 part = 8\nMen = 5 × 8 = 40\nWomen = 2 × 8 = 16";
+const multiLineBoardLines = ["5 : 2", "7 parts = 56", "1 part = 8", "Men = 5 × 8 = 40", "Women = 2 × 8 = 16"];
+
+function svgTextLines(svg: string) {
+  return [...svg.matchAll(/<text xml:space="preserve"[^>]*>(.*?)<\/text>/g)].map(([, spans]) => spans.replace(/<[^>]+>/g, ""));
+}
+
+test("keeps each line break in a board cell as its own board line", async () => {
+  const layout = await wrapPedagogyBoardText(multiLineBoard);
+  assert.deepEqual(layout.lines, multiLineBoardLines);
+});
+
+test("stacks multi-line board text in the solution panel and highlights emphasis on its line", async () => {
+  const svg = await createPedagogySlideSvg({ questionId: "Q", questionText: "Split 56 in the ratio 5 : 2.", options: ["40, 16", "", "", "", ""], board: multiLineBoard, emphasis: "5 × 8 = 40", generatedTimeLabel: "0:00" });
+  const lines = svgTextLines(svg).slice(-multiLineBoardLines.length);
+  assert.deepEqual(lines, multiLineBoardLines);
+  assert.match(svg, /<text xml:space="preserve"[^>]*><tspan xml:space="preserve">Men<\/tspan><tspan xml:space="preserve"> <\/tspan><tspan xml:space="preserve">=<\/tspan><tspan xml:space="preserve"> <\/tspan><tspan xml:space="preserve" fill="#ff5c46"[^>]*>5 × 8 = 40<\/tspan><\/text>/);
+});
