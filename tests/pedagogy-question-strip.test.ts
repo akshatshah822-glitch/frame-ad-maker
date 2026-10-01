@@ -6,18 +6,18 @@ const question = "Rs. 230 is to be divided among 56 persons (men and women). The
 const board = "M : W\nTotal: 15 : 8\nPer person: 3 : 4\nNumber: 5 : 2";
 const base = { questionId: "Q1", questionText: question, options: ["", "", "", "", ""] as [string, string, string, string, string], board, emphasis: "Number: 5 : 2", generatedTimeLabel: "0:10" };
 
-function fontSizes(svg: string) {
-  return [...svg.matchAll(/<text xml:space="preserve"[^>]*font-size="(\d+)"[^>]*>(?:(?!<\/text>).)*Per(?:(?!<\/text>).)*<\/text>/g)].map((m) => Number(m[1]));
-}
-
-test("strip view gives the board a larger area and bigger text than the full question view", async () => {
-  const full = await createPedagogySlideSvg({ ...base, questionView: "full" });
+test("strip view draws a question strip and a large solution panel", async () => {
   const strip = await createPedagogySlideSvg({ ...base, questionView: "strip" });
-  assert.match(strip, /height="240" rx="22"/, "question strip is drawn");
-  assert.match(strip, /height="560" rx="28"/, "large solution panel is drawn");
+  assert.match(strip, /height="260" rx="22"/, "question strip is drawn");
+  assert.match(strip, /height="540" rx="28"/, "large solution panel is drawn");
   const visible = strip.replace(/<[^>]+>/g, "");
   assert.ok(visible.includes("15 : 8") && visible.includes("number of men and women"), "question text still visible in the strip");
-  assert.ok(fontSizes(strip)[0] > fontSizes(full)[0], `board text grows: full ${fontSizes(full)} vs strip ${fontSizes(strip)}`);
+});
+
+test("question strip and board use the same font size", async () => {
+  const strip = await createPedagogySlideSvg({ ...base, questionView: "strip" });
+  const sizes = new Set([...strip.matchAll(/<text xml:space="preserve"[^>]*font-size="(\d+)"/g)].map((m) => m[1]));
+  assert.equal(sizes.size, 1, `one shared size, got ${[...sizes]}`);
 });
 
 test("default view (no questionView) is unchanged full layout", async () => {
@@ -31,7 +31,7 @@ test("falls back to the full layout and logs when a question is too long for the
   try {
     const long = { ...base, questionText: `${question} `.repeat(4), questionView: "strip" as const };
     const svg = await createPedagogySlideSvg(long);
-    assert.doesNotMatch(svg, /height="240" rx="22"/);
+    assert.doesNotMatch(svg, /height="260" rx="22"/);
   } finally { console.info = original; }
   assert.match(JSON.stringify(logged), /full-fallback/);
 });

@@ -116,39 +116,45 @@ function textLine(line: BoardLine, x: number, y: number, size: number) {
   return `<text xml:space="preserve" x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="${size}" font-weight="700" fill="#f5f7f8">${spans}</text>`;
 }
 
-const QUESTION_STRIP_TEXT_HEIGHT = 124;
+const QUESTION_STRIP_TEXT_HEIGHT = 140;
+const STRIP_BOARD_TEXT_HEIGHT = 420;
 
-async function fitQuestionStrip(questionText: string, options: [string, string, string, string, string]) {
+/** One shared font size for the question strip and the board: the largest size at which both fit. */
+async function fitStripAndBoard(questionText: string, options: [string, string, string, string, string], board: string, emphasis: string) {
   const optionText = options.map((option, index) => option.trim() ? `${"ABCDE"[index]}. ${option.trim()}` : "").filter(Boolean).join("   ");
   const text = optionText ? `${questionText.trim()}   ${optionText}` : questionText.trim();
-  for (let size = 32; size >= 22; size -= 2) {
+  for (let size = 44; size >= 22; size -= 2) {
     const lineHeight = Math.ceil(size * 1.3);
-    const lines = await boardLines(text, "", 1560, size);
-    if (lines.length * lineHeight <= QUESTION_STRIP_TEXT_HEIGHT) return { lines, size, lineHeight };
+    const questionLines = await boardLines(text, "", 1560, size);
+    if (questionLines.length * lineHeight > QUESTION_STRIP_TEXT_HEIGHT) continue;
+    const boardLineHeight = Math.ceil(size * 1.35);
+    const lines = board ? await boardLines(board, emphasis, 1450, size) : [];
+    if (lines.length * boardLineHeight > STRIP_BOARD_TEXT_HEIGHT) continue;
+    return { strip: { lines: questionLines, size, lineHeight }, solution: { lines, size, lineHeight: boardLineHeight } };
   }
   return null;
 }
 
 async function createStripSlideSvg(state: PedagogySlideState) {
-  const strip = await fitQuestionStrip(state.questionText ?? "", state.options ?? ["", "", "", "", ""]);
-  if (!strip) {
-    console.info("Pedagogy question view", { path: "full-fallback", reason: "question does not fit the strip" });
+  const fitted = await fitStripAndBoard(state.questionText ?? "", state.options ?? ["", "", "", "", ""], state.board, state.emphasis);
+  if (!fitted) {
+    console.info("Pedagogy question view", { path: "full-fallback", reason: "question and board do not fit the strip layout at one shared size" });
     return null;
   }
-  const solution = await fitSolutionBoard(state.board, state.emphasis, 460, 56);
-  const stripText = strip.lines.map((line, index) => textLine(line, 180, 226 + index * strip.lineHeight, strip.size).replace('fill="#f5f7f8"', 'fill="#dde4f0"')).join("");
-  const firstSolutionLineY = 440 + Math.max(0, (460 - solution.lines.length * solution.lineHeight) / 2) + solution.lineHeight;
+  const { strip, solution } = fitted;
+  const stripText = strip.lines.map((line, index) => textLine(line, 180, 182 + strip.lineHeight + index * strip.lineHeight, strip.size).replace('fill="#f5f7f8"', 'fill="#dde4f0"')).join("");
+  const firstSolutionLineY = 470 + Math.max(0, (STRIP_BOARD_TEXT_HEIGHT - solution.lines.length * solution.lineHeight) / 2) + solution.lineHeight;
   const solutionText = solution.lines.map((line, index) => textLine(line, 230, firstSolutionLineY + index * solution.lineHeight, solution.size)).join("");
   return `<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
       <rect width="1920" height="1080" fill="#101b36"/>
       <rect x="0" y="0" width="1920" height="20" fill="#ff5c46"/>
       <text x="180" y="96" font-family="Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="5" fill="#bfc9dc">EXAM EXPLAINER</text>
       <text x="1740" y="96" text-anchor="end" font-family="Arial, sans-serif" font-size="25" font-weight="800" letter-spacing="3" fill="#ff5c46">${escapeXml(state.generatedTimeLabel)}</text>
-      <rect x="120" y="130" width="1680" height="240" rx="22" fill="#17233e" stroke="#52617f" stroke-width="2"/>
+      <rect x="120" y="130" width="1680" height="260" rx="22" fill="#17233e" stroke="#52617f" stroke-width="2"/>
       <text x="180" y="176" font-family="Arial, sans-serif" font-size="22" font-weight="800" letter-spacing="3" fill="#8794ad">QUESTION${state.questionId ? ` · ${escapeXml(state.questionId)}` : ""}</text>
       ${stripText}
-      <rect x="120" y="390" width="1680" height="560" rx="28" fill="#1a2747" stroke="#ff5c46" stroke-width="3"/>
-      <text x="230" y="444" font-family="Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="3" fill="#ff8a78">SOLUTION</text>
+      <rect x="120" y="410" width="1680" height="540" rx="28" fill="#1a2747" stroke="#ff5c46" stroke-width="3"/>
+      <text x="230" y="462" font-family="Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="3" fill="#ff8a78">SOLUTION</text>
       ${solutionText}
       <text x="150" y="1030" font-family="Arial, sans-serif" font-size="23" font-weight="800" letter-spacing="4" fill="#9eabc3">FRAME / PEDAGOGY BRIEF</text>
     </svg>`;
