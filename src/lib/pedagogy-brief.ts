@@ -167,16 +167,26 @@ export function pedagogyWarnings(rows: PedagogyRow[]) {
     : []);
 }
 
-export function buildAdjustedPedagogyTimeline(rows: PedagogyRow[], narrationDurations: number[]): AdjustedPedagogyTimeline {
+export const PACKED_NARRATION_GAP_SECONDS = 0.25;
+export const PACKED_PAUSE_AFTER_SECONDS = 1;
+
+export type PedagogyTimelineOptions = {
+  /** When true, ignore source timestamps and place each line right after the previous line's audio. */
+  pack?: boolean;
+};
+
+export function buildAdjustedPedagogyTimeline(rows: PedagogyRow[], narrationDurations: number[], options: PedagogyTimelineOptions = {}): AdjustedPedagogyTimeline {
   if (rows.length !== narrationDurations.length) throw new PedagogyBriefValidationError("Every pedagogy row needs one measured narration duration.");
   let adjustedGeneratedTime = 0;
   const audit = rows.map((row, index) => {
     const narrationDuration = narrationDurations[index];
     if (!Number.isFinite(narrationDuration) || narrationDuration <= 0) throw new PedagogyBriefValidationError("Pedagogy narration duration must be a positive number.", { sourceRow: row.sourceRow });
     const originalAvailableDuration = index === rows.length - 1 ? null : rows[index + 1].generatedTime - row.generatedTime;
-    const allocatedDuration = originalAvailableDuration === null
-      ? narrationDuration + 0.5
-      : Math.max(originalAvailableDuration, narrationDuration + 0.5);
+    const allocatedDuration = options.pack
+      ? narrationDuration + (row.pauseAfter === "haan" ? PACKED_PAUSE_AFTER_SECONDS : PACKED_NARRATION_GAP_SECONDS)
+      : originalAvailableDuration === null
+        ? narrationDuration + 0.5
+        : Math.max(originalAvailableDuration, narrationDuration + 0.5);
     const auditRow = {
       sourceRow: row.sourceRow,
       sourceTime: row.sourceTime,

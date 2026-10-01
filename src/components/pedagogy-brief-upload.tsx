@@ -37,6 +37,8 @@ export function PedagogyBriefUpload() {
   const [isRendering, setIsRendering] = useState(false);
   const [timingAudit, setTimingAudit] = useState<TimingAuditRow[]>([]);
   const [videoUrl, setVideoUrl] = useState("");
+  const [packNarration, setPackNarration] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const videoUrlRef = useRef("");
   useEffect(() => () => { if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current); }, []);
 
@@ -48,7 +50,7 @@ export function PedagogyBriefUpload() {
     if (!file) { setFileName(""); return; }
     setFileName(file.name); setIsReviewing(true); setReviewProgress({ type: "progress", phase: "checking-grammar", completed: 0, total: 0 });
     try {
-      const formData = new FormData(); formData.set("brief", file);
+      const formData = new FormData(); formData.set("brief", file); formData.set("pack", packNarration ? "true" : "false");
       const response = await fetch("/api/question/pedagogy/preview", { method: "POST", body: formData });
       const result = await readPedagogyPreviewStream(response, setReviewProgress);
       if (!response.ok || !result?.rows) throw Object.assign(new Error(result?.error || "The pedagogy brief could not be reviewed."), { code: result?.code, sourceRow: result?.sourceRow });
@@ -64,7 +66,7 @@ export function PedagogyBriefUpload() {
     if (!rows.length || isRendering) return;
     setError(""); setErrorCode(""); setErrorSourceRow(null); setIsRendering(true);
     try {
-      const response = await fetch("/api/question/pedagogy/render", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }) });
+      const response = await fetch("/api/question/pedagogy/render", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows, pack: packNarration }) });
       if (!response.ok) {
         let result: RenderErrorResponse;
         try {
@@ -94,7 +96,12 @@ export function PedagogyBriefUpload() {
     </div>
     {mode === "manual" ? <section className="pedagogy-manual" role="tabpanel"><p className="eyebrow">Existing route</p><h2>Manual question generation stays available.</h2><p>This upload path does not replace or change the existing manual `POST /api/question/generate` and `POST /api/question/render` workflow.</p></section> : <section className="pedagogy-upload" role="tabpanel">
       <div className="pedagogy-upload-heading"><div><p className="eyebrow">Step 1</p><h2>Upload the teaching plan.</h2></div><p>First worksheet only. Required: question_id, line_no, time, sir_ka_vaakya, board. Optional: emphasis, pause_after, question_text, option_a, option_b, option_c, option_d, option_e.</p></div>
-      <label className="pedagogy-file-picker"><span>Choose .xlsx file</span><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={uploadBrief} /><b>{isReviewing ? reviewStatus(reviewProgress) : fileName || "No file selected"}</b></label>
+      <label className="pedagogy-pack-option"><input type="checkbox" checked={packNarration} disabled={isReviewing || isRendering} onChange={(event) => {
+        setPackNarration(event.target.checked);
+        setRows([]); setWarnings([]); setTimingAudit([]); setFileName("");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }} /> Pack narration (ignore timestamps, no gaps)</label>
+      <label className="pedagogy-file-picker"><span>Choose .xlsx file</span><input ref={fileInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={uploadBrief} /><b>{isReviewing ? reviewStatus(reviewProgress) : fileName || "No file selected"}</b></label>
       {error ? <p className="error" role="alert"><strong>{errorCode || "PEDAGOGY_PREVIEW_FAILED"}{errorSourceRow === null ? "" : ` · Row ${errorSourceRow}`}</strong><br />{error}</p> : null}
       {warnings.length ? <section className="pedagogy-warnings" aria-label="Brief warnings"><strong>Review warnings</strong><ul>{warnings.map((warning, index) => <li key={`warning-${index}`}>{warning}</li>)}</ul></section> : null}
       {rows.length ? <>
