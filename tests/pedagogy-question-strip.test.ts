@@ -13,10 +13,10 @@ function fontSizes(svg: string) {
 test("strip view gives the board a larger area and bigger text than the full question view", async () => {
   const full = await createPedagogySlideSvg({ ...base, questionView: "full" });
   const strip = await createPedagogySlideSvg({ ...base, questionView: "strip" });
-  assert.match(strip, /height="200" rx="22"/, "slim question strip is drawn");
-  assert.match(strip, /height="600" rx="28"/, "large solution panel is drawn");
+  assert.match(strip, /height="240" rx="22"/, "question strip is drawn");
+  assert.match(strip, /height="560" rx="28"/, "large solution panel is drawn");
   const visible = strip.replace(/<[^>]+>/g, "");
-  assert.ok(visible.includes("15 : 8") && visible.includes("Find the number"), "question text still visible in the strip");
+  assert.ok(visible.includes("15 : 8") && visible.includes("number of men and women"), "question text still visible in the strip");
   assert.ok(fontSizes(strip)[0] > fontSizes(full)[0], `board text grows: full ${fontSizes(full)} vs strip ${fontSizes(strip)}`);
 });
 
@@ -31,7 +31,7 @@ test("falls back to the full layout and logs when a question is too long for the
   try {
     const long = { ...base, questionText: `${question} `.repeat(4), questionView: "strip" as const };
     const svg = await createPedagogySlideSvg(long);
-    assert.doesNotMatch(svg, /height="200" rx="22"/);
+    assert.doesNotMatch(svg, /height="240" rx="22"/);
   } finally { console.info = original; }
   assert.match(JSON.stringify(logged), /full-fallback/);
 });
