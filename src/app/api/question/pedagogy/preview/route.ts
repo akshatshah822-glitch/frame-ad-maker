@@ -27,7 +27,7 @@ function logPreviewDiagnostic(diagnostic: ReturnType<typeof previewDiagnostic>) 
   console.error("Pedagogy preview failed", { code: diagnostic.code, sourceRow: diagnostic.sourceRow, reason: diagnostic.reason });
 }
 
-function streamPreview(rows: PedagogyRow[]) {
+function streamPreview(rows: PedagogyRow[], pack: boolean) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -40,12 +40,12 @@ function streamPreview(rows: PedagogyRow[]) {
         try {
           ({ narrationDurations } = await createPedagogyNarrationTracks(rows, directory, ({ completed, total }) => {
             send({ type: "progress", phase: "measuring-narration", completed, total });
-          }));
+          }, { trimSilence: pack }));
         } finally {
           await rm(directory, { recursive: true, force: true });
         }
         send({ type: "progress", phase: "building-timeline", completed: rows.length, total: rows.length });
-        const timeline = buildAdjustedPedagogyTimeline(rows, narrationDurations!);
+        const timeline = buildAdjustedPedagogyTimeline(rows, narrationDurations!, { pack });
         const warnings = [...new Set(pedagogyWarnings(rows))];
         if (warnings.length) console.warn("Pedagogy brief warnings", { count: warnings.length });
         if (grammarWarnings.length) console.warn("Pedagogy grammar warnings", { count: grammarWarnings.length });
@@ -78,7 +78,7 @@ const post = async (request: Request) => {
     return NextResponse.json(diagnostic, { status: 400 });
   }
   try {
-    return streamPreview(validatePedagogyRows(await worksheetRows(file)));
+    return streamPreview(validatePedagogyRows(await worksheetRows(file)), formData.get("pack") === "true");
   } catch (error) {
     const diagnostic = previewDiagnostic(error);
     logPreviewDiagnostic(diagnostic);

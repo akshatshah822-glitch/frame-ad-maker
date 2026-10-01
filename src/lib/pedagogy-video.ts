@@ -20,6 +20,8 @@ export type PedagogyFileRenderOptions = {
   directory: string;
   outputPath: string;
   onProgress?: (progress: PedagogyRenderProgress) => void;
+  /** Pack narration: trim clip-edge silence and place lines back to back, ignoring timestamps. */
+  pack?: boolean;
 };
 
 export class PedagogySlideRenderError extends Error {
@@ -39,15 +41,16 @@ async function runFfmpeg(args: string[]) {
 }
 
 export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: PedagogyFileRenderOptions) {
-  const { directory, outputPath, onProgress } = options;
+  const { directory, outputPath, onProgress, pack = false } = options;
+  console.info("Pedagogy timing mode", { path: pack ? "packed" : "timestamps" });
   const warningMessages = pedagogyWarnings(rows);
   if (warningMessages.length) console.warn("Pedagogy renderer warnings", { count: warningMessages.length });
 
   const { narrationPaths, narrationDurations } = await createPedagogyNarrationTracks(rows, directory, ({ completed, total }) => {
     onProgress?.({ phase: "generating-narration", completed, total });
-  });
+  }, { trimSilence: pack });
   onProgress?.({ phase: "building-timeline" });
-  const timeline = buildAdjustedPedagogyTimeline(rows, narrationDurations);
+  const timeline = buildAdjustedPedagogyTimeline(rows, narrationDurations, { pack });
   for (let index = 0; index < rows.length - 1; index += 1) {
     const availableDuration = timeline.audit[index].allocatedDuration;
     if (rows[index].pauseAfter === "haan") console.info("Pedagogy pause preserved", { sourceRow: rows[index].sourceRow, silenceSeconds: Math.max(0, availableDuration - narrationDurations[index]).toFixed(3) });
@@ -88,9 +91,9 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   return { outputPath, qa: { ...qa, renderSource: "code", narrationDurations, timingAudit: timeline.audit, warningCount: warningMessages.length } };
 }
 
-export async function renderPedagogyVideo(rows: PedagogyRow[]) {
+export async function renderPedagogyVideo(rows: PedagogyRow[], options: { pack?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "frame-pedagogy-"));
   const outputPath = join(directory, "pedagogy-explainer.mp4");
-  const result = await renderPedagogyVideoToFile(rows, { directory, outputPath });
+  const result = await renderPedagogyVideoToFile(rows, { directory, outputPath, pack: options.pack === true });
   return { bytes: new Uint8Array(await readFile(outputPath)), qa: result.qa };
 }

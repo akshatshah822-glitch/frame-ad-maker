@@ -37,14 +37,14 @@ function suppliedRows(value: unknown): PedagogyBriefInputRow[] {
 const post = async (request: Request) => {
   if (!process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Pedagogy narration audio and grammar review are not configured.", code: "PEDAGOGY_SERVICE_UNAVAILABLE", sourceRow: null }, { status: 503 });
   try {
-    const body = await request.json().catch(() => null) as { rows?: unknown } | null;
+    const body = await request.json().catch(() => null) as { rows?: unknown; pack?: unknown } | null;
     const rows = validatePedagogyRows(suppliedRows(body?.rows));
     const grammarWarnings = [...new Set((await Promise.all(rows.map(async (row) => {
       const review = await validateQuestionNarrationGrammar(row.narration);
       return review.passes ? [] : review.issues.map((issue) => `Row ${row.sourceRow}: grammar warning: ${issue}`);
     }))).flat())];
     if (grammarWarnings.length) console.warn("Pedagogy grammar warnings", { count: grammarWarnings.length });
-    const result = await renderPedagogyVideo(rows);
+    const result = await renderPedagogyVideo(rows, { pack: body?.pack === true });
     return new NextResponse(result.bytes, {
       headers: {
         "Content-Type": "video/mp4",
