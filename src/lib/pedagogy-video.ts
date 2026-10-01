@@ -61,7 +61,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   for (const [index, row] of timeline.rows.entries()) {
     const framePath = join(directory, `frame-${String(index).padStart(4, "0")}.png`);
     try {
-      await writeFile(framePath, await createPedagogySlide({ questionId: row.questionId, questionText: row.effectiveQuestionText, options: row.effectiveOptions, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel }));
+      await writeFile(framePath, await createPedagogySlide({ questionId: row.questionId, questionText: row.effectiveQuestionText, options: row.effectiveOptions, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, questionView: index > 0 && timeline.rows[index - 1].questionId === row.questionId ? "strip" : "full" }));
     } catch {
       throw new PedagogySlideRenderError(row.sourceRow);
     }
