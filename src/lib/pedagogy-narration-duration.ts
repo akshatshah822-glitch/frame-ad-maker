@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { PedagogyRow } from "@/lib/pedagogy-brief";
-import { generateNarrationTrack } from "@/lib/voice";
+import { generatePedagogyNarrationTrack } from "@/lib/pedagogy-voice";
 
 const exec = promisify(execFile);
 
@@ -61,7 +61,7 @@ export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directo
   for (const [index, row] of rows.entries()) {
     const narrationPath = join(directory, `narration-${String(index).padStart(4, "0")}.mp3`);
     try {
-      const audio = await generateNarrationTrack(row.narration);
+      const audio = await generatePedagogyNarrationTrack(row.narration);
       try { await writeFile(narrationPath, audio); } catch { throw new PedagogyNarrationMeasurementError(row.sourceRow, "audio-write"); }
     } catch (error) {
       if (error instanceof PedagogyNarrationMeasurementError) throw error;
