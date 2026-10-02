@@ -48,3 +48,14 @@ test("a long arc under the digits stays clear of the step box", () => {
   const peak = (endY + controlY) / 2;
   assert.ok(peak < 520, `arc peak ${peak} must stay above the step box at 520`);
 });
+
+test("a new question_id starts with an empty result and working row", () => {
+  const rows = validatePedagogyRows([
+    base({ questionId: "B1", layout: "trick", working: "96 × 98", result: "9408 ✓" }, 2),
+    base({ questionId: "B2", layout: "trick" }, 3),
+    base({ questionId: "B2", layout: "trick", working: "113 × 116", result: "129 | _ _" }, 4),
+  ]);
+  assert.equal(rows[1].effectiveResult, "");
+  assert.equal(rows[1].effectiveWorking, "");
+  assert.equal(rows[2].effectiveResult, "129 | _ _");
+});

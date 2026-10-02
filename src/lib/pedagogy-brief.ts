@@ -192,7 +192,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedWorking = "";
   let retainedResult = "";
   const firstTimestamp = rows[0].sourceSeconds;
-  return rows.map((row) => {
+  return rows.map((row, index) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
     if (previousTime !== undefined && row.sourceSeconds < previousTime) throw rowError(row.sourceRow, `time ${JSON.stringify(row.sourceTime)} moves backwards after line_no ${row.lineNo - 1}.`);
     previousLineNo = row.lineNo;
@@ -201,6 +201,11 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     if (row.questionText.trim()) {
       retainedQuestionText = row.questionText;
       retainedOptions = row.options;
+    }
+    // Working row and result belong to one question: a new question_id starts clean.
+    if (index > 0 && row.questionId !== rows[index - 1].questionId) {
+      retainedWorking = "";
+      retainedResult = "";
     }
     if (row.working.trim()) retainedWorking = row.working;
     if (row.result.trim()) retainedResult = row.result;
