@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 import { PedagogyBriefValidationError, validatePedagogyRows, type PedagogyBriefInputRow } from "@/lib/pedagogy-brief";
 import { PedagogyNarrationMeasurementError } from "@/lib/pedagogy-narration-duration";
-import { validateQuestionNarrationGrammar } from "@/lib/question-narration";
+import { cachedPedagogyGrammarReview } from "@/lib/pedagogy-narration";
 import { renderPedagogyVideo } from "@/lib/pedagogy-video";
 
 export const maxDuration = 300;
@@ -40,7 +40,7 @@ const post = async (request: Request) => {
     const body = await request.json().catch(() => null) as { rows?: unknown; pack?: unknown } | null;
     const rows = validatePedagogyRows(suppliedRows(body?.rows));
     const grammarWarnings = [...new Set((await Promise.all(rows.map(async (row) => {
-      const review = await validateQuestionNarrationGrammar(row.narration);
+      const review = await cachedPedagogyGrammarReview(row.narration);
       return review.passes ? [] : review.issues.map((issue) => `Row ${row.sourceRow}: grammar warning: ${issue}`);
     }))).flat())];
     if (grammarWarnings.length) console.warn("Pedagogy grammar warnings", { count: grammarWarnings.length });
