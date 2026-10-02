@@ -26,6 +26,7 @@ const WORKING_Y = 400;
 const WORKING_SIZE = 108;
 const CHAR_STEP = 84;
 const SPACE_STEP = 64;
+export const BELOW_ARC_MAX_LIFT = 120;
 
 function escapeXml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
@@ -64,7 +65,8 @@ function arcSvg(arc: PedagogyArc, layout: ReturnType<typeof workingLayout>, colo
   const start = layout[arc.from];
   const end = layout[arc.to];
   const distance = Math.abs(end.x - start.x);
-  const lift = 50 + distance * 0.22;
+  // Arcs under the digits must stay above the step box (top at y=520): the curve peaks at lift/2.
+  const lift = arc.below ? Math.min(BELOW_ARC_MAX_LIFT, 50 + distance * 0.22) : 50 + distance * 0.22;
   const y = arc.below ? WORKING_Y + 34 : WORKING_Y - WORKING_SIZE * 0.82;
   const controlY = arc.below ? y + lift : y - lift;
   const controlX = (start.x + end.x) / 2;

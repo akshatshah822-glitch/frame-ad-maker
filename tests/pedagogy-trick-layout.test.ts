@@ -41,3 +41,10 @@ test("arc draws on with progress and the final answer gets a tick box", () => {
   assert.equal(offset(end), 0);
   assert.match(end, /stroke="#7fe08a"/);
 });
+
+test("a long arc under the digits stays clear of the step box", () => {
+  const svg = createTrickSlideSvg({ title: "T", working: "113 +13 × 116 +16", arcs: [{ from: 12, to: 2, below: true }], step: "Step", result: "", previousResult: "", stepIndex: 0 }, 1);
+  const [, , , controlY, , endY] = /d="M ([\d.]+) ([\d.]+) Q ([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+)"/.exec(svg)!.slice(1).map(Number);
+  const peak = (endY + controlY) / 2;
+  assert.ok(peak < 520, `arc peak ${peak} must stay above the step box at 520`);
+});
