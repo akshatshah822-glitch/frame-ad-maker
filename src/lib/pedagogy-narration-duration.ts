@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { PedagogyRow } from "@/lib/pedagogy-brief";
 import { DEFAULT_PEDAGOGY_CACHE_DIRECTORY, ESTIMATED_TTS_USD_PER_MINUTE, readCachedNarration, storeCachedNarration } from "@/lib/pedagogy-narration-cache";
-import { generatePedagogyNarrationTrack, resolvePedagogyVoice } from "@/lib/pedagogy-voice";
+import { assertEducatorVoiceAllowed, generatePedagogyNarrationTrack, resolvePedagogyVoice } from "@/lib/pedagogy-voice";
 
 const exec = promisify(execFile);
 
@@ -69,6 +69,7 @@ export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directo
   const useCache = options.useCache !== false;
   const cacheDirectory = options.cacheDirectory ?? DEFAULT_PEDAGOGY_CACHE_DIRECTORY;
   const voice = resolvePedagogyVoice();
+  if (!options.generate) await assertEducatorVoiceAllowed(voice);
   const generate = options.generate ?? ((narration: string) => generatePedagogyNarrationTrack(narration, voice));
   const usage = { generated: 0, cacheHits: 0, generatedCharacters: 0, generatedSeconds: 0 };
   for (const [index, row] of rows.entries()) {

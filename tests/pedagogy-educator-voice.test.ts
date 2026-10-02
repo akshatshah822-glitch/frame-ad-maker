@@ -32,3 +32,26 @@ test("educator request uses the multilingual model and keeps the script word for
   assert.equal(request.body.model_id, "eleven_multilingual_v2");
   assert.throws(() => buildEducatorSpeechRequest("  ", "v"), /blank/);
 });
+
+test("real-person clones need a consent reference; library and designed voices do not", async () => {
+  const { decideEducatorVoice } = await import("../src/lib/pedagogy-voice");
+  assert.equal(decideEducatorVoice("premade", "").allowed, true);
+  assert.equal(decideEducatorVoice("generated", "").allowed, true);
+  assert.equal(decideEducatorVoice("cloned", "elevenlabs voice, type to be checked before first render").allowed, false);
+  assert.equal(decideEducatorVoice("professional", "").allowed, false);
+  assert.equal(decideEducatorVoice("professional", "https://example.com/signed-consent.pdf").allowed, true);
+  assert.equal(decideEducatorVoice("something-new", "x").allowed, false, "unknown voice types are blocked");
+});
+
+test("the voice check blocks a clone without consent before any audio is made", async () => {
+  const { assertEducatorVoiceAllowed } = await import("../src/lib/pedagogy-voice");
+  const voice = { provider: "elevenlabs" as const, label: "educator" as const, voiceId: "clone-1", consentRef: "elevenlabs voice, type to be checked before first render" };
+  const fakeFetch = (async () => new Response(JSON.stringify({ name: "Some Teacher", category: "cloned" }), { status: 200 })) as typeof fetch;
+  const original = console.info;
+  console.info = () => {};
+  try {
+    await assert.rejects(assertEducatorVoiceAllowed(voice, fakeFetch), /Educator voice blocked: this voice is a clone of a real person/);
+  } finally {
+    console.info = original;
+  }
+});
