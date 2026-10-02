@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { PedagogyRow } from "@/lib/pedagogy-brief";
 import { DEFAULT_PEDAGOGY_CACHE_DIRECTORY, ESTIMATED_TTS_USD_PER_MINUTE, readCachedNarration, storeCachedNarration } from "@/lib/pedagogy-narration-cache";
-import { generatePedagogyNarrationTrack } from "@/lib/pedagogy-voice";
+import { generatePedagogyNarrationTrack, resolvePedagogyVoice } from "@/lib/pedagogy-voice";
 
 const exec = promisify(execFile);
 
@@ -68,7 +68,8 @@ export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directo
   const narrationDurations: number[] = [];
   const useCache = options.useCache !== false;
   const cacheDirectory = options.cacheDirectory ?? DEFAULT_PEDAGOGY_CACHE_DIRECTORY;
-  const generate = options.generate ?? generatePedagogyNarrationTrack;
+  const voice = resolvePedagogyVoice();
+  const generate = options.generate ?? ((narration: string) => generatePedagogyNarrationTrack(narration, voice));
   const usage = { generated: 0, cacheHits: 0, generatedCharacters: 0, generatedSeconds: 0 };
   for (const [index, row] of rows.entries()) {
     const narrationPath = join(directory, `narration-${String(index).padStart(4, "0")}.mp3`);
@@ -100,7 +101,8 @@ export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directo
     }
     onProgress?.({ completed: index + 1, total: rows.length });
   }
-  const estimatedUsd = Number((usage.generatedSeconds / 60 * ESTIMATED_TTS_USD_PER_MINUTE).toFixed(4));
-  console.info("Pedagogy narration usage", { path: usage.cacheHits === rows.length ? "all-cached" : usage.generated === rows.length ? "all-generated" : "mixed", ...usage, generatedSeconds: Number(usage.generatedSeconds.toFixed(2)), estimatedUsd });
+  // The per-minute estimate is for the default OpenAI voice; educator-voice cost is on the ElevenLabs credit dashboard.
+  const estimatedUsd = voice.provider === "openai" ? Number((usage.generatedSeconds / 60 * ESTIMATED_TTS_USD_PER_MINUTE).toFixed(4)) : null;
+  console.info("Pedagogy narration usage", { voice: voice.label, ...(voice.provider === "elevenlabs" ? { consentRef: voice.consentRef } : {}), path: usage.cacheHits === rows.length ? "all-cached" : usage.generated === rows.length ? "all-generated" : "mixed", ...usage, generatedSeconds: Number(usage.generatedSeconds.toFixed(2)), estimatedUsd });
   return { narrationPaths, narrationDurations, usage: { ...usage, estimatedUsd } };
 }

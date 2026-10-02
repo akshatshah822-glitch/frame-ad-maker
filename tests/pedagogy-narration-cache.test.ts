@@ -32,7 +32,7 @@ test("voice is generated once per line: the second run reuses cached audio", asy
   const first = await createPedagogyNarrationTracks(rows("दूसरी लाइन।"), await mkdtemp(join(tmpdir(), "run1-")), undefined, { cacheDirectory, generate });
   assert.equal(calls.length, 2, "first run (upload) generates both lines");
   assert.equal(first.usage.generated, 2);
-  assert.ok(first.usage.estimatedUsd > 0);
+  assert.ok((first.usage.estimatedUsd ?? 0) > 0);
   const second = await createPedagogyNarrationTracks(rows("दूसरी लाइन।"), await mkdtemp(join(tmpdir(), "run2-")), undefined, { cacheDirectory, generate });
   assert.equal(calls.length, 2, "second run (Generate) makes no new voice calls");
   assert.equal(second.usage.cacheHits, 2);

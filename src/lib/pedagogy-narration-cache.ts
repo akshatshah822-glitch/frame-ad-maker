@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildPedagogySpeechRequest } from "@/lib/pedagogy-voice";
+import { buildPedagogySpeechRequest, pedagogyVoiceCacheIdentity } from "@/lib/pedagogy-voice";
 
 /**
  * Disk cache so the same narration line is voiced (and grammar-checked) once,
@@ -17,7 +17,9 @@ function hash(value: string) {
 
 export function narrationCacheKey(narration: string) {
   const { input, ...voiceSettings } = buildPedagogySpeechRequest(narration);
-  return hash(JSON.stringify({ kind: "narration-v1", input, voiceSettings }));
+  const educatorVoice = pedagogyVoiceCacheIdentity();
+  // Default voice keeps its original key, so audio cached before this change is still reused.
+  return hash(JSON.stringify(educatorVoice ? { kind: "narration-v1", input, voiceSettings, educatorVoice } : { kind: "narration-v1", input, voiceSettings }));
 }
 
 export function grammarCacheKey(narration: string, reviewerId: string) {
