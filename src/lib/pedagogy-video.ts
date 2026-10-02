@@ -3,9 +3,10 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { buildAdjustedPedagogyTimeline, pedagogyWarnings, type PedagogyRow } from "@/lib/pedagogy-brief";
+import { buildAdjustedPedagogyTimeline, parsePedagogyArcs, PedagogyBriefValidationError, pedagogyWarnings, type PedagogyRow } from "@/lib/pedagogy-brief";
 import { createPedagogyNarrationTracks } from "@/lib/pedagogy-narration-duration";
 import { createPedagogySlide } from "@/lib/pedagogy-slide";
+import { createTrickSlide, TRICK_ANIMATION_FRAMES, TRICK_FRAME_SECONDS } from "@/lib/pedagogy-trick-slide";
 import { probeFinalVideo } from "@/lib/video-qa";
 
 const exec = promisify(execFile);
@@ -58,17 +59,44 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
 
   const totalDuration = timeline.totalDuration;
   const concatLines: string[] = [];
+  let lastFrame = "";
+  const trickRows = timeline.rows.filter((row) => row.layout === "trick").length;
+  console.info("Pedagogy layout", { path: trickRows === 0 ? "board" : trickRows === rows.length ? "trick" : "mixed", trickRows });
   for (const [index, row] of timeline.rows.entries()) {
-    const framePath = join(directory, `frame-${String(index).padStart(4, "0")}.png`);
+    const framePrefix = join(directory, `frame-${String(index).padStart(4, "0")}`);
     try {
-      await writeFile(framePath, await createPedagogySlide({ questionId: row.questionId, questionText: row.effectiveQuestionText, options: row.effectiveOptions, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, questionView: index > 0 && timeline.rows[index - 1].questionId === row.questionId ? "strip" : "full" }));
-    } catch {
+      if (row.layout === "trick") {
+        const previous = timeline.rows[index - 1];
+        const state = {
+          title: row.effectiveQuestionText.trim() || row.questionId,
+          working: row.effectiveWorking,
+          arcs: row.arcs ? parsePedagogyArcs(row.arcs, row.effectiveWorking, row.sourceRow) : [],
+          step: row.board,
+          result: row.effectiveResult,
+          previousResult: previous?.layout === "trick" ? previous.effectiveResult : "",
+          stepIndex: index,
+        };
+        const animationSeconds = Math.min(TRICK_ANIMATION_FRAMES * TRICK_FRAME_SECONDS, row.allocatedDuration * 0.6);
+        const frameSeconds = animationSeconds / TRICK_ANIMATION_FRAMES;
+        for (let frame = 1; frame <= TRICK_ANIMATION_FRAMES; frame += 1) {
+          const framePath = `${framePrefix}-${String(frame).padStart(2, "0")}.png`;
+          await writeFile(framePath, await createTrickSlide(state, frame / TRICK_ANIMATION_FRAMES));
+          const duration = frame === TRICK_ANIMATION_FRAMES ? row.allocatedDuration - animationSeconds + frameSeconds : frameSeconds;
+          concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+          lastFrame = framePath;
+        }
+      } else {
+        const framePath = `${framePrefix}.png`;
+        await writeFile(framePath, await createPedagogySlide({ questionId: row.questionId, questionText: row.effectiveQuestionText, options: row.effectiveOptions, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, questionView: index > 0 && timeline.rows[index - 1].questionId === row.questionId ? "strip" : "full" }));
+        concatLines.push(`file '${framePath}'`, `duration ${row.allocatedDuration.toFixed(6)}`);
+        lastFrame = framePath;
+      }
+    } catch (error) {
+      if (error instanceof PedagogyBriefValidationError) throw error;
       throw new PedagogySlideRenderError(row.sourceRow);
     }
-    concatLines.push(`file '${framePath}'`, `duration ${row.allocatedDuration.toFixed(6)}`);
     onProgress?.({ phase: "rendering-slides", completed: index + 1, total: rows.length });
   }
-  const lastFrame = join(directory, `frame-${String(rows.length - 1).padStart(4, "0")}.png`);
   concatLines.push(`file '${lastFrame}'`);
   const concatPath = join(directory, "timeline.txt");
   await writeFile(concatPath, concatLines.join("\n"));
