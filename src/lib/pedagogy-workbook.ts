@@ -26,5 +26,9 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     optionC: row.option_c,
     optionD: row.option_d,
     optionE: row.option_e,
+    layout: row.layout,
+    working: row.working,
+    arcs: row.arcs,
+    result: row.result,
   } satisfies PedagogyBriefInputRow));
 }

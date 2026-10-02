@@ -95,7 +95,7 @@ export function PedagogyBriefUpload() {
       <button type="button" role="tab" aria-selected={mode === "pedagogy"} onClick={() => setMode("pedagogy")}>Pedagogy Brief Upload</button>
     </div>
     {mode === "manual" ? <section className="pedagogy-manual" role="tabpanel"><p className="eyebrow">Existing route</p><h2>Manual question generation stays available.</h2><p>This upload path does not replace or change the existing manual `POST /api/question/generate` and `POST /api/question/render` workflow.</p></section> : <section className="pedagogy-upload" role="tabpanel">
-      <div className="pedagogy-upload-heading"><div><p className="eyebrow">Step 1</p><h2>Upload the teaching plan.</h2></div><p>First worksheet only. Required: question_id, line_no, time, sir_ka_vaakya, board. Optional: emphasis, pause_after, question_text, option_a, option_b, option_c, option_d, option_e.</p></div>
+      <div className="pedagogy-upload-heading"><div><p className="eyebrow">Step 1</p><h2>Upload the teaching plan.</h2></div><p>First worksheet only. Required: question_id, line_no, time, sir_ka_vaakya, board. Optional: emphasis, pause_after, question_text, option_a, option_b, option_c, option_d, option_e. Animated trick layout (optional): layout = trick, working, arcs, result.</p></div>
       <label className="pedagogy-pack-option"><input type="checkbox" checked={packNarration} disabled={isReviewing || isRendering} onChange={(event) => {
         setPackNarration(event.target.checked);
         setRows([]); setWarnings([]); setTimingAudit([]); setFileName("");

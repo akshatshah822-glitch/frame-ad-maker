@@ -15,7 +15,17 @@ export type PedagogyBriefInputRow = {
   optionC?: unknown;
   optionD?: unknown;
   optionE?: unknown;
+  /** Optional. "trick" = animated working layout (digits + arcs + step box + result). Blank = classic board. */
+  layout?: unknown;
+  /** Optional, trick layout only: the working row, e.g. "12 × 236". Carries forward when blank. */
+  working?: unknown;
+  /** Optional, trick layout only: arcs between working characters, e.g. "0>3; 1>4 neeche". Not carried forward. */
+  arcs?: unknown;
+  /** Optional, trick layout only: the result line, e.g. "2 7 _ _". Carries forward when blank. */
+  result?: unknown;
 };
+
+export type PedagogyArc = { from: number; to: number; below: boolean };
 
 export type PedagogyRow = {
   sourceRow: number;
@@ -34,6 +44,12 @@ export type PedagogyRow = {
   options: [string, string, string, string, string];
   effectiveQuestionText: string;
   effectiveOptions: [string, string, string, string, string];
+  layout: "board" | "trick";
+  working: string;
+  effectiveWorking: string;
+  arcs: string;
+  result: string;
+  effectiveResult: string;
 };
 
 export type PedagogyTimingAuditRow = {
@@ -117,6 +133,30 @@ function parsePause(value: unknown, sourceRow: number): "haan" | "nahi" {
   throw rowError(sourceRow, 'pause_after must be "haan", "nahi", or blank.');
 }
 
+function parseLayout(value: unknown, sourceRow: number): "board" | "trick" {
+  const text = valueAsText(value).trim().toLowerCase();
+  if (!text || text === "board") return "board";
+  if (text === "trick") return "trick";
+  throw rowError(sourceRow, 'layout must be "trick", "board", or blank.');
+}
+
+/** Non-space characters of the working row; arc indexes count these, starting at 0. */
+export function workingCharacters(working: string) {
+  return [...working].filter((character) => !/\s/.test(character));
+}
+
+export function parsePedagogyArcs(arcs: string, working: string, sourceRow: number): PedagogyArc[] {
+  const count = workingCharacters(working).length;
+  return arcs.split(/[;,]/).map((part) => part.trim()).filter(Boolean).map((part) => {
+    const match = /^(\d+)\s*>\s*(\d+)(?:\s+(neeche|below|upar|above))?$/i.exec(part);
+    if (!match) throw rowError(sourceRow, `arc ${JSON.stringify(part)} must look like "0>3" or "1>4 neeche".`);
+    const from = Number(match[1]);
+    const to = Number(match[2]);
+    if (from >= count || to >= count || from === to) throw rowError(sourceRow, `arc ${JSON.stringify(part)} must join two different characters of the working row (0 to ${count - 1}).`);
+    return { from, to, below: /neeche|below/i.test(match[3] ?? "") };
+  });
+}
+
 export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   if (!Array.isArray(inputRows) || inputRows.length === 0) throw new PedagogyBriefValidationError("The first worksheet has no data rows.");
   const rows = inputRows.map((input) => {
@@ -137,6 +177,10 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       pauseAfter: parsePause(input.pauseAfter, sourceRow),
       questionText: valueAsText(input.questionText),
       options: [valueAsText(input.optionA), valueAsText(input.optionB), valueAsText(input.optionC), valueAsText(input.optionD), valueAsText(input.optionE)] as [string, string, string, string, string],
+      layout: parseLayout(input.layout, sourceRow),
+      working: valueAsText(input.working),
+      arcs: valueAsText(input.arcs).trim(),
+      result: valueAsText(input.result),
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
@@ -145,6 +189,8 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedBoard = "";
   let retainedQuestionText = "";
   let retainedOptions: [string, string, string, string, string] = ["", "", "", "", ""];
+  let retainedWorking = "";
+  let retainedResult = "";
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -156,8 +202,11 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       retainedQuestionText = row.questionText;
       retainedOptions = row.options;
     }
+    if (row.working.trim()) retainedWorking = row.working;
+    if (row.result.trim()) retainedResult = row.result;
+    if (row.arcs) parsePedagogyArcs(row.arcs, retainedWorking, row.sourceRow);
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    return { ...row, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    return { ...row, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 
