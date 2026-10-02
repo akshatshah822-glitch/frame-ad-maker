@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { PedagogyRow } from "@/lib/pedagogy-brief";
+import { DEFAULT_PEDAGOGY_CACHE_DIRECTORY, ESTIMATED_TTS_USD_PER_MINUTE, readCachedNarration, storeCachedNarration } from "@/lib/pedagogy-narration-cache";
 import { generatePedagogyNarrationTrack } from "@/lib/pedagogy-voice";
 
 const exec = promisify(execFile);
@@ -53,19 +54,40 @@ export async function trimNarrationSilence(inputPath: string, outputPath: string
   }
 }
 
-export type PedagogyNarrationTrackOptions = { trimSilence?: boolean };
+export type PedagogyNarrationTrackOptions = {
+  trimSilence?: boolean;
+  /** Reuse narration already voiced for the exact same text and voice settings. Default true. */
+  useCache?: boolean;
+  cacheDirectory?: string;
+  /** Test seam; defaults to the real pedagogy TTS call. */
+  generate?: (narration: string) => Promise<Uint8Array>;
+};
 
 export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directory: string, onProgress?: (progress: { completed: number; total: number }) => void, options: PedagogyNarrationTrackOptions = {}) {
   const narrationPaths: string[] = [];
   const narrationDurations: number[] = [];
+  const useCache = options.useCache !== false;
+  const cacheDirectory = options.cacheDirectory ?? DEFAULT_PEDAGOGY_CACHE_DIRECTORY;
+  const generate = options.generate ?? generatePedagogyNarrationTrack;
+  const usage = { generated: 0, cacheHits: 0, generatedCharacters: 0, generatedSeconds: 0 };
   for (const [index, row] of rows.entries()) {
     const narrationPath = join(directory, `narration-${String(index).padStart(4, "0")}.mp3`);
+    let fromCache = false;
     try {
-      const audio = await generatePedagogyNarrationTrack(row.narration);
+      const cached = useCache ? await readCachedNarration(row.narration, cacheDirectory) : null;
+      fromCache = cached !== null;
+      const audio = cached ?? await generate(row.narration);
       try { await writeFile(narrationPath, audio); } catch { throw new PedagogyNarrationMeasurementError(row.sourceRow, "audio-write"); }
+      if (!fromCache && useCache) await storeCachedNarration(row.narration, audio, cacheDirectory);
     } catch (error) {
       if (error instanceof PedagogyNarrationMeasurementError) throw error;
       throw new PedagogyNarrationMeasurementError(row.sourceRow, "speech-generation");
+    }
+    if (fromCache) usage.cacheHits += 1;
+    else {
+      usage.generated += 1;
+      usage.generatedCharacters += row.narration.length;
+      try { usage.generatedSeconds += await probeDuration(narrationPath); } catch { /* duration is probed again below and fails loudly there */ }
     }
     if (options.trimSilence) {
       const trim = await trimNarrationSilence(narrationPath, join(directory, `narration-${String(index).padStart(4, "0")}-trimmed.wav`), row.sourceRow);
@@ -78,5 +100,7 @@ export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directo
     }
     onProgress?.({ completed: index + 1, total: rows.length });
   }
-  return { narrationPaths, narrationDurations };
+  const estimatedUsd = Number((usage.generatedSeconds / 60 * ESTIMATED_TTS_USD_PER_MINUTE).toFixed(4));
+  console.info("Pedagogy narration usage", { path: usage.cacheHits === rows.length ? "all-cached" : usage.generated === rows.length ? "all-generated" : "mixed", ...usage, generatedSeconds: Number(usage.generatedSeconds.toFixed(2)), estimatedUsd });
+  return { narrationPaths, narrationDurations, usage: { ...usage, estimatedUsd } };
 }
