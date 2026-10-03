@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { buildAdjustedPedagogyTimeline, parsePedagogyArcs, PedagogyBriefValidationError, pedagogyWarnings, type PedagogyRow } from "@/lib/pedagogy-brief";
 import { createPedagogyNarrationTracks } from "@/lib/pedagogy-narration-duration";
-import { createPedagogySlide } from "@/lib/pedagogy-slide";
-import { createPassageSlide } from "@/lib/pedagogy-passage-slide";
+import { createPedagogySlide, pedagogySlideFontSize, type PedagogySlideState } from "@/lib/pedagogy-slide";
+import { createPassageSlide, passageSlideFontSize } from "@/lib/pedagogy-passage-slide";
 import { createTrickSlide, TRICK_ANIMATION_FRAMES, TRICK_FRAME_SECONDS } from "@/lib/pedagogy-trick-slide";
 import { probeFinalVideo } from "@/lib/video-qa";
 
@@ -65,13 +65,35 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const passageRows = timeline.rows.filter((row) => row.layout === "passage").length;
   const layouts = new Set(timeline.rows.map((row) => row.layout));
   console.info("Pedagogy layout", { path: layouts.size === 1 ? [...layouts][0] : "mixed", trickRows, passageRows });
+  // One text size per slide type for the whole video: every slide uses the smallest size any slide of that type needs.
+  const boardState = (index: number): PedagogySlideState => {
+    const row = timeline.rows[index];
+    // Every question slide uses the strip view, so question, options and solution share one text size.
+    return { questionId: row.questionId, questionText: row.effectiveQuestionText, options: row.effectiveOptions, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, questionView: "strip" };
+  };
+  const passageState = (index: number) => {
+    const row = timeline.rows[index];
+    const taught = timeline.rows.slice(0, index).filter((earlier) => earlier.questionId === row.questionId && earlier.emphasis.trim()).map((earlier) => earlier.emphasis);
+    return { passage: row.effectiveQuestionText, emphasis: row.emphasis, taught, board: row.board, title: "Read with me", timeLabel: row.adjustedGeneratedTimeLabel };
+  };
+  const sizeByLayout = new Map<string, number>();
+  for (const [index, row] of timeline.rows.entries()) {
+    if (row.layout === "trick") continue;
+    const key = row.layout;
+    try {
+      const size = row.layout === "passage" ? await passageSlideFontSize(passageState(index)) : await pedagogySlideFontSize(boardState(index));
+      sizeByLayout.set(key, Math.min(size, sizeByLayout.get(key) ?? size));
+    } catch {
+      throw new PedagogySlideRenderError(row.sourceRow);
+    }
+  }
+  console.info("Pedagogy text size", { path: "one-size-per-video", sizes: Object.fromEntries(sizeByLayout) });
   for (const [index, row] of timeline.rows.entries()) {
     const framePrefix = join(directory, `frame-${String(index).padStart(4, "0")}`);
     try {
       if (row.layout === "passage") {
         const framePath = `${framePrefix}.png`;
-        const taught = timeline.rows.slice(0, index).filter((earlier) => earlier.questionId === row.questionId && earlier.emphasis.trim()).map((earlier) => earlier.emphasis);
-        await writeFile(framePath, await createPassageSlide({ passage: row.effectiveQuestionText, emphasis: row.emphasis, taught, board: row.board, title: "Read with me", timeLabel: row.adjustedGeneratedTimeLabel }));
+        await writeFile(framePath, await createPassageSlide({ ...passageState(index), maxFontSize: sizeByLayout.get("passage") }));
         concatLines.push(`file '${framePath}'`, `duration ${row.allocatedDuration.toFixed(6)}`);
         lastFrame = framePath;
       } else if (row.layout === "trick") {
@@ -96,7 +118,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         }
       } else {
         const framePath = `${framePrefix}.png`;
-        await writeFile(framePath, await createPedagogySlide({ questionId: row.questionId, questionText: row.effectiveQuestionText, options: row.effectiveOptions, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, questionView: index > 0 && timeline.rows[index - 1].questionId === row.questionId ? "strip" : "full" }));
+        await writeFile(framePath, await createPedagogySlide({ ...boardState(index), maxFontSize: sizeByLayout.get(row.layout) }));
         concatLines.push(`file '${framePath}'`, `duration ${row.allocatedDuration.toFixed(6)}`);
         lastFrame = framePath;
       }
