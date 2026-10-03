@@ -14,6 +14,8 @@ export type PassageSlideState = {
   board: string;
   title: string;
   timeLabel: string;
+  /** Upper limit for the text size; the renderer sets one value per passage so all its slides match. */
+  maxFontSize?: number;
 };
 
 const FONT = "Georgia, 'Times New Roman', serif";
@@ -62,14 +64,14 @@ export function phraseRanges(passage: string, phrases: string[]) {
 
 const overlaps = (word: Word, ranges: [number, number][]) => ranges.some(([a, b]) => word.start < b && word.end > a);
 
-async function layoutPassage(passage: string, maxWidth: number, maxHeight: number) {
+async function layoutPassage(passage: string, maxWidth: number, maxHeight: number, cap = 44) {
   const paragraphs: { text: string; offset: number }[] = [];
   let offset = 0;
   for (const text of passage.split("\n")) {
     if (text.trim()) paragraphs.push({ text, offset });
     offset += text.length + 1;
   }
-  for (let size = 44; size >= 22; size -= 2) {
+  for (let size = Math.min(44, cap); size >= 22; size -= 2) {
     const lineHeight = Math.round(size * 1.55);
     const paragraphGap = Math.round(size * 0.7);
     const space = Math.max(size * 0.22, await textWidth("a a", size) - 2 * await textWidth("a", size));
@@ -93,8 +95,8 @@ async function layoutPassage(passage: string, maxWidth: number, maxHeight: numbe
   throw new Error("Passage does not fit on the slide at the minimum readable size.");
 }
 
-async function wrapNotes(board: string, maxWidth: number) {
-  for (let size = 40; size >= 24; size -= 2) {
+async function wrapNotes(board: string, maxWidth: number, largestSize: number) {
+  for (let size = largestSize; size >= 20; size -= 2) {
     const lines: string[] = [];
     for (const raw of board.split("\n")) {
       let current = "";
@@ -107,13 +109,20 @@ async function wrapNotes(board: string, maxWidth: number) {
     const lineHeight = Math.round(size * 1.45);
     if (lines.length * lineHeight <= NOTE_BOX.height - 150) return { lines, size, lineHeight };
   }
-  return { lines: board.split("\n"), size: 24, lineHeight: 35 };
+  return { lines: board.split("\n"), size: 20, lineHeight: 29 };
+}
+
+/** The text size this passage slide would use on its own (passage and meaning card share it). */
+export async function passageSlideFontSize(state: PassageSlideState) {
+  const layout = await layoutPassage(state.passage, PASSAGE_BOX.width - PASSAGE_BOX.padding * 2, PASSAGE_BOX.height - PASSAGE_BOX.padding * 2 - 20, state.maxFontSize);
+  const notes = await wrapNotes(state.board, NOTE_BOX.width - NOTE_BOX.padding * 2, layout.size);
+  return Math.min(layout.size, notes.size);
 }
 
 export async function createPassageSlideSvg(state: PassageSlideState) {
   const innerWidth = PASSAGE_BOX.width - PASSAGE_BOX.padding * 2;
   const innerHeight = PASSAGE_BOX.height - PASSAGE_BOX.padding * 2 - 20;
-  const layout = await layoutPassage(state.passage, innerWidth, innerHeight);
+  const layout = await layoutPassage(state.passage, innerWidth, innerHeight, state.maxFontSize);
   const current = phraseRanges(state.passage, [state.emphasis]);
   const taught = phraseRanges(state.passage, state.taught);
 
@@ -137,7 +146,8 @@ export async function createPassageSlideSvg(state: PassageSlideState) {
     text.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="${FONT}" font-size="${layout.size}" fill="${isCurrent ? "#1b1b2f" : "#eef1f7"}">${escapeXml(word.text)}</text>`);
   }
 
-  const notes = await wrapNotes(state.board, NOTE_BOX.width - NOTE_BOX.padding * 2);
+  // Same size as the passage text, so the meaning reads at the same weight as the passage.
+  const notes = await wrapNotes(state.board, NOTE_BOX.width - NOTE_BOX.padding * 2, layout.size);
   const noteText = notes.lines.map((line, index) => {
     const [head, ...rest] = line.split(" = ");
     const y = NOTE_BOX.y + 150 + index * notes.lineHeight;

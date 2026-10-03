@@ -9,6 +9,8 @@ export type PedagogySlideState = {
   generatedTimeLabel: string;
   /** "strip" shrinks an already-read question to a slim top band so the board gets most of the slide. */
   questionView?: "full" | "strip";
+  /** Upper limit for the text size. The renderer sets one value per question so every slide of a question uses the same size. */
+  maxFontSize?: number;
 };
 
 type BoardSegment = { text: string; emphasized: boolean };
@@ -75,9 +77,9 @@ async function boardLines(board: string, emphasis: string, maximumWidth: number,
   return lines.filter((line) => line.length);
 }
 
-async function fitBoard(board: string, emphasis: string) {
-  if (!board) return { lines: [] as BoardLine[], size: 48, lineHeight: 60 };
-  for (let size = 64; size >= 24; size -= 2) {
+async function fitBoard(board: string, emphasis: string, cap = 64) {
+  if (!board) return { lines: [] as BoardLine[], size: Math.min(48, cap), lineHeight: 60 };
+  for (let size = Math.min(64, cap); size >= 24; size -= 2) {
     const lineHeight = Math.ceil(size * 1.35);
     const lines = await boardLines(board, emphasis, 1450, size);
     if (lines.length * lineHeight <= 650) return { lines, size, lineHeight };
@@ -86,7 +88,7 @@ async function fitBoard(board: string, emphasis: string) {
 }
 
 async function fitSolutionBoard(board: string, emphasis: string, maximumHeight = 280, largestSize = 52) {
-  if (!board) return { lines: [] as BoardLine[], size: 38, lineHeight: 52 };
+  if (!board) return { lines: [] as BoardLine[], size: Math.min(38, largestSize), lineHeight: 52 };
   for (let size = largestSize; size >= 20; size -= 2) {
     const lineHeight = Math.ceil(size * 1.35);
     const lines = await boardLines(board, emphasis, 1450, size);
@@ -97,8 +99,8 @@ async function fitSolutionBoard(board: string, emphasis: string, maximumHeight =
 
 type QuestionPanelLine = { line: BoardLine; optionLabel?: string };
 
-async function fitQuestionPanel(questionText: string, options: [string, string, string, string, string]) {
-  for (let size = 38; size >= 18; size -= 2) {
+async function fitQuestionPanel(questionText: string, options: [string, string, string, string, string], cap = 38) {
+  for (let size = Math.min(38, cap); size >= 18; size -= 2) {
     const lineHeight = Math.ceil(size * 1.3);
     const questionLines = await boardLines(questionText, "", 1450, size);
     const optionLines = await Promise.all(options.map((option) => option.trim() ? boardLines(option, "", 1360, size) : Promise.resolve([] as BoardLine[])));
@@ -120,10 +122,10 @@ const QUESTION_STRIP_TEXT_HEIGHT = 140;
 const STRIP_BOARD_TEXT_HEIGHT = 420;
 
 /** One shared font size for the question strip and the board: the largest size at which both fit. */
-async function fitStripAndBoard(questionText: string, options: [string, string, string, string, string], board: string, emphasis: string) {
+async function fitStripAndBoard(questionText: string, options: [string, string, string, string, string], board: string, emphasis: string, cap = 44) {
   const optionText = options.map((option, index) => option.trim() ? `${"ABCDE"[index]}. ${option.trim()}` : "").filter(Boolean).join("   ");
   const text = optionText ? `${questionText.trim()}   ${optionText}` : questionText.trim();
-  for (let size = 44; size >= 22; size -= 2) {
+  for (let size = Math.min(44, cap); size >= 22; size -= 2) {
     const lineHeight = Math.ceil(size * 1.3);
     const questionLines = await boardLines(text, "", 1560, size);
     if (questionLines.length * lineHeight > QUESTION_STRIP_TEXT_HEIGHT) continue;
@@ -136,7 +138,7 @@ async function fitStripAndBoard(questionText: string, options: [string, string, 
 }
 
 async function createStripSlideSvg(state: PedagogySlideState) {
-  const fitted = await fitStripAndBoard(state.questionText ?? "", state.options ?? ["", "", "", "", ""], state.board, state.emphasis);
+  const fitted = await fitStripAndBoard(state.questionText ?? "", state.options ?? ["", "", "", "", ""], state.board, state.emphasis, state.maxFontSize);
   if (!fitted) {
     console.info("Pedagogy question view", { path: "full-fallback", reason: "question and board do not fit the strip layout at one shared size" });
     return null;
@@ -160,9 +162,46 @@ async function createStripSlideSvg(state: PedagogySlideState) {
     </svg>`;
 }
 
+/**
+ * Full question view: the question and the solution use ONE font size (the largest at which
+ * both fit), so the solution never looks bigger or smaller than the question it answers.
+ */
+async function fitQuestionAndSolution(questionText: string, options: [string, string, string, string, string], board: string, emphasis: string, cap = 38) {
+  for (let size = Math.min(38, cap); size >= 18; size -= 2) {
+    const questionLineHeight = Math.ceil(size * 1.3);
+    const questionLines = await boardLines(questionText, "", 1450, size);
+    const optionLines = await Promise.all(options.map((option) => option.trim() ? boardLines(option, "", 1360, size) : Promise.resolve([] as BoardLine[])));
+    const lines: QuestionPanelLine[] = [
+      ...questionLines.map((line) => ({ line })),
+      ...optionLines.flatMap((linesForOption, optionIndex) => linesForOption.map((line, lineIndex) => ({ line, optionLabel: lineIndex === 0 ? `${"ABCDE"[optionIndex]}.` : undefined }))),
+    ];
+    if (lines.length * questionLineHeight > 218) continue;
+    const solutionLineHeight = Math.ceil(size * 1.35);
+    const solutionLines = board ? await boardLines(board, emphasis, 1450, size) : [];
+    if (solutionLines.length * solutionLineHeight > 280) continue;
+    return { question: { lines, size, lineHeight: questionLineHeight }, solution: { lines: solutionLines, size, lineHeight: solutionLineHeight } };
+  }
+  console.info("Pedagogy question view", { path: "separate-sizes-fallback", reason: "question and solution do not fit at one shared size" });
+  return { question: await fitQuestionPanel(questionText, options, cap), solution: await fitSolutionBoard(board, emphasis, 280, Math.min(52, cap)) };
+}
+
 export async function wrapPedagogyBoardText(board: string, emphasis = ""): Promise<PedagogyBoardLayout> {
   const layout = await fitBoard(board, emphasis);
   return { lines: layout.lines.map(lineText), size: layout.size, lineHeight: layout.lineHeight };
+}
+
+/** The text size this slide would use on its own (same decisions as createPedagogySlideSvg). */
+export async function pedagogySlideFontSize(state: PedagogySlideState) {
+  const options = state.options ?? ["", "", "", "", ""];
+  if (state.questionText?.trim() && state.questionView === "strip") {
+    const fitted = await fitStripAndBoard(state.questionText, options, state.board, state.emphasis, state.maxFontSize);
+    if (fitted) return fitted.strip.size;
+  }
+  if (state.questionText?.trim()) {
+    const { question, solution } = await fitQuestionAndSolution(state.questionText, options, state.board, state.emphasis, state.maxFontSize);
+    return Math.min(question.size, solution.size);
+  }
+  return (await fitBoard(state.board, state.emphasis, state.maxFontSize)).size;
 }
 
 export async function createPedagogySlideSvg(state: PedagogySlideState) {
@@ -173,8 +212,7 @@ export async function createPedagogySlideSvg(state: PedagogySlideState) {
     if (stripSvg) return stripSvg;
   }
   if (state.questionText?.trim()) {
-    const question = await fitQuestionPanel(state.questionText, state.options ?? ["", "", "", "", ""]);
-    const solution = await fitSolutionBoard(state.board, state.emphasis);
+    const { question, solution } = await fitQuestionAndSolution(state.questionText, state.options ?? ["", "", "", "", ""], state.board, state.emphasis, state.maxFontSize);
     const firstQuestionLineY = 240 + Math.max(0, (218 - question.lines.length * question.lineHeight) / 2) + question.lineHeight;
     const questionText = question.lines.map(({ line, optionLabel }, index) => `${optionLabel ? `<text x="230" y="${firstQuestionLineY + index * question.lineHeight}" font-family="Arial, sans-serif" font-size="${question.size}" font-weight="800" fill="#ff5c46">${optionLabel}</text>` : ""}${textLine(line, optionLabel ? 310 : 230, firstQuestionLineY + index * question.lineHeight, question.size)}`).join("");
     const firstSolutionLineY = 610 + Math.max(0, (280 - solution.lines.length * solution.lineHeight) / 2) + solution.lineHeight;
@@ -193,7 +231,7 @@ export async function createPedagogySlideSvg(state: PedagogySlideState) {
       <text x="150" y="1015" font-family="Arial, sans-serif" font-size="23" font-weight="800" letter-spacing="4" fill="#9eabc3">FRAME / PEDAGOGY BRIEF</text>
     </svg>`;
   }
-  const layout = await fitBoard(state.board, state.emphasis);
+  const layout = await fitBoard(state.board, state.emphasis, state.maxFontSize);
   const firstLineY = 290 + Math.max(0, (650 - layout.lines.length * layout.lineHeight) / 2) + layout.lineHeight;
   const boardText = layout.lines.map((line, index) => textLine(line, 230, firstLineY + index * layout.lineHeight, layout.size)).join("");
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
