@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { buildAdjustedPedagogyTimeline, parsePedagogyArcs, PedagogyBriefValidationError, pedagogyWarnings, type PedagogyRow } from "@/lib/pedagogy-brief";
 import { createPedagogyNarrationTracks } from "@/lib/pedagogy-narration-duration";
 import { createPedagogySlide } from "@/lib/pedagogy-slide";
+import { createPassageSlide } from "@/lib/pedagogy-passage-slide";
 import { createTrickSlide, TRICK_ANIMATION_FRAMES, TRICK_FRAME_SECONDS } from "@/lib/pedagogy-trick-slide";
 import { probeFinalVideo } from "@/lib/video-qa";
 
@@ -61,11 +62,19 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const concatLines: string[] = [];
   let lastFrame = "";
   const trickRows = timeline.rows.filter((row) => row.layout === "trick").length;
-  console.info("Pedagogy layout", { path: trickRows === 0 ? "board" : trickRows === rows.length ? "trick" : "mixed", trickRows });
+  const passageRows = timeline.rows.filter((row) => row.layout === "passage").length;
+  const layouts = new Set(timeline.rows.map((row) => row.layout));
+  console.info("Pedagogy layout", { path: layouts.size === 1 ? [...layouts][0] : "mixed", trickRows, passageRows });
   for (const [index, row] of timeline.rows.entries()) {
     const framePrefix = join(directory, `frame-${String(index).padStart(4, "0")}`);
     try {
-      if (row.layout === "trick") {
+      if (row.layout === "passage") {
+        const framePath = `${framePrefix}.png`;
+        const taught = timeline.rows.slice(0, index).filter((earlier) => earlier.questionId === row.questionId && earlier.emphasis.trim()).map((earlier) => earlier.emphasis);
+        await writeFile(framePath, await createPassageSlide({ passage: row.effectiveQuestionText, emphasis: row.emphasis, taught, board: row.board, title: "Read with me", timeLabel: row.adjustedGeneratedTimeLabel }));
+        concatLines.push(`file '${framePath}'`, `duration ${row.allocatedDuration.toFixed(6)}`);
+        lastFrame = framePath;
+      } else if (row.layout === "trick") {
         const previous = timeline.rows[index - 1];
         const state = {
           title: row.effectiveQuestionText.trim() || row.questionId,

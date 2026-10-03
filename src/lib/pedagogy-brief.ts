@@ -15,7 +15,7 @@ export type PedagogyBriefInputRow = {
   optionC?: unknown;
   optionD?: unknown;
   optionE?: unknown;
-  /** Optional. "trick" = animated working layout (digits + arcs + step box + result). Blank = classic board. */
+  /** Optional. "trick" = animated working layout (digits + arcs + step box + result). "passage" = whole reading passage on screen with the explained word highlighted. Blank = classic board. */
   layout?: unknown;
   /** Optional, trick layout only: the working row, e.g. "12 × 236". Carries forward when blank. */
   working?: unknown;
@@ -44,7 +44,7 @@ export type PedagogyRow = {
   options: [string, string, string, string, string];
   effectiveQuestionText: string;
   effectiveOptions: [string, string, string, string, string];
-  layout: "board" | "trick";
+  layout: "board" | "trick" | "passage";
   working: string;
   effectiveWorking: string;
   arcs: string;
@@ -133,11 +133,12 @@ function parsePause(value: unknown, sourceRow: number): "haan" | "nahi" {
   throw rowError(sourceRow, 'pause_after must be "haan", "nahi", or blank.');
 }
 
-function parseLayout(value: unknown, sourceRow: number): "board" | "trick" {
+function parseLayout(value: unknown, sourceRow: number): "board" | "trick" | "passage" {
   const text = valueAsText(value).trim().toLowerCase();
   if (!text || text === "board") return "board";
   if (text === "trick") return "trick";
-  throw rowError(sourceRow, 'layout must be "trick", "board", or blank.');
+  if (text === "passage") return "passage";
+  throw rowError(sourceRow, 'layout must be "trick", "passage", "board", or blank.');
 }
 
 /** Non-space characters of the working row; arc indexes count these, starting at 0. */
@@ -216,7 +217,11 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
 }
 
 export function pedagogyWarnings(rows: PedagogyRow[]) {
-  return rows.flatMap((row) => row.emphasis.trim() && !row.effectiveBoard.includes(row.emphasis)
+  return rows.flatMap((row) => row.layout === "passage"
+    ? (row.emphasis.trim() && !row.effectiveQuestionText.toLowerCase().includes(row.emphasis.trim().toLowerCase())
+      ? [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not appear in the passage; no highlight was added.`]
+      : [])
+    : row.emphasis.trim() && !row.effectiveBoard.includes(row.emphasis)
     ? [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not exist on the current board; no highlight was added.`]
     : []);
 }
