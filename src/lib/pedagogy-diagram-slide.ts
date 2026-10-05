@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 
 /**
  * "Diagram" layout: a board diagram that builds step by step while the teacher explains,
@@ -199,10 +200,25 @@ export async function createDiagramSlideSvg(state: DiagramSlideState, progress =
     })
     .join("");
   const notes = await wrapNotes(state.board, state.maxFontSize ?? 40);
-  const emphasis = state.emphasis.trim();
+  // Every key phrase is drawn in yellow inside its line; the rest of the line keeps its normal colour.
+  const phrases = emphasisPhrases(state.emphasis);
   const noteText = notes.lines.map((line, index) => {
-    const colour = emphasis && line.includes(emphasis) ? "#ffd166" : line.includes("✗") ? "#ff8a7a" : "#eef1f7";
-    return `<text x="${NOTES.x + NOTES.padding}" y="${NOTES.y + 130 + index * notes.lineHeight}" font-family="${SANS}" font-size="${notes.size}" fill="${colour}">${escapeXml(line)}</text>`;
+    const base = line.includes("✗") ? "#ff8a7a" : "#eef1f7";
+    const marks = phrases.flatMap((phrase) => {
+      const found: [number, number][] = [];
+      for (let at = line.indexOf(phrase); at >= 0; at = line.indexOf(phrase, at + phrase.length)) found.push([at, at + phrase.length]);
+      return found;
+    }).toSorted((a, b) => a[0] - b[0]);
+    let cursor = 0;
+    const spans: string[] = [];
+    for (const [start, end] of marks) {
+      if (start < cursor) continue;
+      if (start > cursor) spans.push(`<tspan>${escapeXml(line.slice(cursor, start))}</tspan>`);
+      spans.push(`<tspan fill="#ffd166">${escapeXml(line.slice(start, end))}</tspan>`);
+      cursor = end;
+    }
+    if (cursor < line.length) spans.push(`<tspan>${escapeXml(line.slice(cursor))}</tspan>`);
+    return `<text xml:space="preserve" x="${NOTES.x + NOTES.padding}" y="${NOTES.y + 130 + index * notes.lineHeight}" font-family="${SANS}" font-size="${notes.size}" fill="${base}">${spans.join("")}</text>`;
   }).join("");
   return `<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
     <rect width="1920" height="1080" fill="#101a30"/><rect width="1920" height="10" fill="${MISSING}"/>

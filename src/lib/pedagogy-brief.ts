@@ -1,3 +1,4 @@
+import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 import { diagramNames, diagramStepCount } from "@/lib/pedagogy-diagram-slide";
 export const pedagogyRequiredColumns = ["question_id", "line_no", "time", "sir_ka_vaakya", "board"] as const;
 
@@ -270,6 +271,8 @@ export function pedagogyWarnings(rows: PedagogyRow[]) {
     ? (row.emphasis.trim() && !row.effectiveQuestionText.toLowerCase().includes(row.emphasis.trim().toLowerCase())
       ? [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not appear in the passage; no highlight was added.`]
       : [])
+    : row.layout === "concept" || row.layout === "diagram"
+    ? emphasisPhrases(row.emphasis).filter((phrase) => !row.effectiveBoard.includes(phrase)).map((phrase) => `Row ${row.sourceRow}: emphasis ${JSON.stringify(phrase)} does not exist on the current board; no highlight was added.`)
     : row.emphasis.trim() && !row.effectiveBoard.includes(row.emphasis)
     ? [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not exist on the current board; no highlight was added.`]
     : []);
