@@ -8,6 +8,7 @@ import { createPedagogyNarrationTracks } from "@/lib/pedagogy-narration-duration
 import { createPedagogySlide, pedagogySlideFontSize, type PedagogySlideState } from "@/lib/pedagogy-slide";
 import { createPassageSlide, passageSlideFontSize } from "@/lib/pedagogy-passage-slide";
 import { createTrickSlide, TRICK_ANIMATION_FRAMES, TRICK_FRAME_SECONDS } from "@/lib/pedagogy-trick-slide";
+import { createDiagramSlide, diagramSlideFontSize, DIAGRAM_ANIMATION_FRAMES, DIAGRAM_FRAME_SECONDS, type DiagramSlideState } from "@/lib/pedagogy-diagram-slide";
 import { probeFinalVideo } from "@/lib/video-qa";
 
 const exec = promisify(execFile);
@@ -63,8 +64,9 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   let lastFrame = "";
   const trickRows = timeline.rows.filter((row) => row.layout === "trick").length;
   const passageRows = timeline.rows.filter((row) => row.layout === "passage").length;
+  const diagramRows = timeline.rows.filter((row) => row.layout === "diagram").length;
   const layouts = new Set(timeline.rows.map((row) => row.layout));
-  console.info("Pedagogy layout", { path: layouts.size === 1 ? [...layouts][0] : "mixed", trickRows, passageRows });
+  console.info("Pedagogy layout", { path: layouts.size === 1 ? [...layouts][0] : "mixed", trickRows, passageRows, diagramRows });
   // One text size per slide type for the whole video: every slide uses the smallest size any slide of that type needs.
   const boardState = (index: number): PedagogySlideState => {
     const row = timeline.rows[index];
@@ -76,12 +78,18 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     const taught = timeline.rows.slice(0, index).filter((earlier) => earlier.questionId === row.questionId && earlier.emphasis.trim()).map((earlier) => earlier.emphasis);
     return { passage: row.effectiveQuestionText, emphasis: row.emphasis, taught, board: row.board, title: "Read with me", timeLabel: row.adjustedGeneratedTimeLabel };
   };
+  const diagramState = (index: number): DiagramSlideState => {
+    const row = timeline.rows[index];
+    return { diagram: row.diagram, step: row.diagramStep, board: row.effectiveBoard, emphasis: row.emphasis, title: row.effectiveQuestionText.trim() || row.questionId, timeLabel: row.adjustedGeneratedTimeLabel };
+  };
   const sizeByLayout = new Map<string, number>();
   for (const [index, row] of timeline.rows.entries()) {
     if (row.layout === "trick") continue;
     const key = row.layout;
     try {
-      const size = row.layout === "passage" ? await passageSlideFontSize(passageState(index)) : await pedagogySlideFontSize(boardState(index));
+      const size = row.layout === "passage" ? await passageSlideFontSize(passageState(index))
+        : row.layout === "diagram" ? await diagramSlideFontSize(diagramState(index))
+        : await pedagogySlideFontSize(boardState(index));
       sizeByLayout.set(key, Math.min(size, sizeByLayout.get(key) ?? size));
     } catch {
       throw new PedagogySlideRenderError(row.sourceRow);
@@ -96,6 +104,21 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         await writeFile(framePath, await createPassageSlide({ ...passageState(index), maxFontSize: sizeByLayout.get("passage") }));
         concatLines.push(`file '${framePath}'`, `duration ${row.allocatedDuration.toFixed(6)}`);
         lastFrame = framePath;
+      } else if (row.layout === "diagram") {
+        const previous = timeline.rows[index - 1];
+        const state = { ...diagramState(index), maxFontSize: sizeByLayout.get("diagram") };
+        // Fade the newest step in only when the drawing changes; otherwise hold the finished drawing.
+        const isNewStep = !previous || previous.layout !== "diagram" || previous.diagram !== row.diagram || previous.diagramStep !== row.diagramStep || previous.questionId !== row.questionId;
+        const frames = isNewStep ? DIAGRAM_ANIMATION_FRAMES : 1;
+        const animationSeconds = isNewStep ? Math.min(DIAGRAM_ANIMATION_FRAMES * DIAGRAM_FRAME_SECONDS, row.allocatedDuration * 0.6) : 0;
+        const frameSeconds = isNewStep ? animationSeconds / DIAGRAM_ANIMATION_FRAMES : 0;
+        for (let frame = 1; frame <= frames; frame += 1) {
+          const framePath = `${framePrefix}-${String(frame).padStart(2, "0")}.png`;
+          await writeFile(framePath, await createDiagramSlide(state, frame / frames));
+          const duration = frame === frames ? row.allocatedDuration - animationSeconds + frameSeconds : frameSeconds;
+          concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+          lastFrame = framePath;
+        }
       } else if (row.layout === "trick") {
         const previous = timeline.rows[index - 1];
         const state = {

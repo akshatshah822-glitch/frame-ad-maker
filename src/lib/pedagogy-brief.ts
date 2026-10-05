@@ -1,3 +1,4 @@
+import { diagramNames, diagramStepCount } from "@/lib/pedagogy-diagram-slide";
 export const pedagogyRequiredColumns = ["question_id", "line_no", "time", "sir_ka_vaakya", "board"] as const;
 
 export type PedagogyBriefInputRow = {
@@ -23,6 +24,10 @@ export type PedagogyBriefInputRow = {
   arcs?: unknown;
   /** Optional, trick layout only: the result line, e.g. "2 7 _ _". Carries forward when blank. */
   result?: unknown;
+  /** Optional, diagram layout only: which code-drawn diagram, e.g. "canal-network". Carries forward within a question_id. */
+  diagram?: unknown;
+  /** Optional, diagram layout only: how many steps of the diagram are drawn (1 = first step). Blank = same as the row before. */
+  diagramStep?: unknown;
 };
 
 export type PedagogyArc = { from: number; to: number; below: boolean };
@@ -44,7 +49,10 @@ export type PedagogyRow = {
   options: [string, string, string, string, string];
   effectiveQuestionText: string;
   effectiveOptions: [string, string, string, string, string];
-  layout: "board" | "trick" | "passage";
+  layout: "board" | "trick" | "passage" | "diagram";
+  /** Diagram name and step; "" and 0 on rows that are not diagram rows. */
+  diagram: string;
+  diagramStep: number;
   working: string;
   effectiveWorking: string;
   arcs: string;
@@ -133,12 +141,13 @@ function parsePause(value: unknown, sourceRow: number): "haan" | "nahi" {
   throw rowError(sourceRow, 'pause_after must be "haan", "nahi", or blank.');
 }
 
-function parseLayout(value: unknown, sourceRow: number): "board" | "trick" | "passage" {
+function parseLayout(value: unknown, sourceRow: number): "board" | "trick" | "passage" | "diagram" {
   const text = valueAsText(value).trim().toLowerCase();
   if (!text || text === "board") return "board";
   if (text === "trick") return "trick";
   if (text === "passage") return "passage";
-  throw rowError(sourceRow, 'layout must be "trick", "passage", "board", or blank.');
+  if (text === "diagram") return "diagram";
+  throw rowError(sourceRow, 'layout must be "trick", "passage", "diagram", "board", or blank.');
 }
 
 /** Non-space characters of the working row; arc indexes count these, starting at 0. */
@@ -182,6 +191,8 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       working: valueAsText(input.working),
       arcs: valueAsText(input.arcs).trim(),
       result: valueAsText(input.result),
+      diagramName: valueAsText(input.diagram).trim().toLowerCase(),
+      diagramStepText: valueAsText(input.diagramStep).trim(),
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
@@ -192,6 +203,8 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedOptions: [string, string, string, string, string] = ["", "", "", "", ""];
   let retainedWorking = "";
   let retainedResult = "";
+  let retainedDiagram = "";
+  let retainedDiagramStep = 0;
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row, index) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -211,8 +224,31 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     if (row.working.trim()) retainedWorking = row.working;
     if (row.result.trim()) retainedResult = row.result;
     if (row.arcs) parsePedagogyArcs(row.arcs, retainedWorking, row.sourceRow);
+    // Diagram name and step belong to one question: a new question_id starts clean.
+    if (index > 0 && row.questionId !== rows[index - 1].questionId) {
+      retainedDiagram = "";
+      retainedDiagramStep = 0;
+    }
+    let diagram = "";
+    let diagramStep = 0;
+    if (row.layout === "diagram") {
+      if (row.diagramName && row.diagramName !== retainedDiagram) retainedDiagramStep = 0;
+      if (row.diagramName) retainedDiagram = row.diagramName;
+      const steps = diagramStepCount(retainedDiagram);
+      if (!steps) throw rowError(row.sourceRow, `diagram ${JSON.stringify(retainedDiagram)} is not a FRAME diagram. Use one of: ${diagramNames.join(", ")}.`);
+      if (row.diagramStepText) {
+        const step = Number(row.diagramStepText);
+        if (!Number.isInteger(step) || step < 1 || step > steps) throw rowError(row.sourceRow, `diagram_step must be a whole number from 1 to ${steps} for ${retainedDiagram}.`);
+        retainedDiagramStep = step;
+      } else if (!retainedDiagramStep) retainedDiagramStep = 1;
+      diagram = retainedDiagram;
+      diagramStep = retainedDiagramStep;
+    }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    return { ...row, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    const { diagramName, diagramStepText, ...rest } = row;
+    void diagramName;
+    void diagramStepText;
+    return { ...rest, diagram, diagramStep, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 
