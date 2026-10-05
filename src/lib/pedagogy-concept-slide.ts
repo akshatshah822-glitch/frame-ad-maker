@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 import { phraseRanges } from "@/lib/pedagogy-passage-slide";
 
 /**
@@ -69,7 +70,7 @@ export async function conceptSlideFontSize(state: ConceptSlideState) {
 
 export async function createConceptSlideSvg(state: ConceptSlideState) {
   const layout = await layoutNotes(state.board, state.maxFontSize ?? 56);
-  const highlight = phraseRanges(state.board, [state.emphasis]);
+  const highlight = phraseRanges(state.board, emphasisPhrases(state.emphasis));
   const firstY = NOTES.y + 130;
   const marks: string[] = [];
   const text: string[] = [];
