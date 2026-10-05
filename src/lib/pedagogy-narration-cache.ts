@@ -17,7 +17,7 @@ function hash(value: string) {
 
 export function narrationCacheKey(narration: string) {
   const { input, ...voiceSettings } = buildPedagogySpeechRequest(narration);
-  const educatorVoice = pedagogyVoiceCacheIdentity();
+  const educatorVoice = pedagogyVoiceCacheIdentity(undefined, input);
   // Default voice keeps its original key, so audio cached before this change is still reused.
   return hash(JSON.stringify(educatorVoice ? { kind: "narration-v1", input, voiceSettings, educatorVoice } : { kind: "narration-v1", input, voiceSettings }));
 }

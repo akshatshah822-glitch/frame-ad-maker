@@ -55,3 +55,14 @@ test("the voice check blocks a clone without consent before any audio is made", 
     console.info = original;
   }
 });
+
+test("Gujarati narration switches the educator voice to eleven_v3; Hindi stays on multilingual v2", async () => {
+  const { educatorVoiceModel, pedagogyVoiceCacheIdentity } = await import("../src/lib/pedagogy-voice");
+  const gujarati = buildEducatorSpeechRequest("બાળકનો વિકાસ સતત ચાલે છે.", "v");
+  assert.equal(gujarati.body.model_id, "eleven_v3");
+  assert.equal(gujarati.body.voice_settings.stability, 0.5);
+  assert.equal(educatorVoiceModel("छियानवे गुणा अट्ठानवे।"), "eleven_multilingual_v2");
+  const voice = { provider: "elevenlabs" as const, label: "educator" as const, voiceId: "v", consentRef: "c" };
+  assert.equal(pedagogyVoiceCacheIdentity(voice, "છ")?.model, "eleven_v3");
+  assert.equal(pedagogyVoiceCacheIdentity(voice, "छह")?.model, "eleven_multilingual_v2");
+});
