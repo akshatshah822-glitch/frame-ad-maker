@@ -57,7 +57,7 @@ function lineText(line: BoardLine) {
   return line.map((segment) => segment.text).join("");
 }
 
-async function boardLines(board: string, emphasis: string, maximumWidth: number, size: number): Promise<BoardLine[]> {
+export async function boardLines(board: string, emphasis: string, maximumWidth: number, size: number): Promise<BoardLine[]> {
   const lines: BoardLine[] = [[]];
   for (const token of boardTokens(board, emphasis)) {
     const isWhitespace = /^\s+$/.test(token.text);
@@ -113,7 +113,7 @@ async function fitQuestionPanel(questionText: string, options: [string, string, 
   throw new Error("Invalid question: does not fit in the question panel at the minimum readable size.");
 }
 
-function textLine(line: BoardLine, x: number, y: number, size: number) {
+export function textLine(line: BoardLine, x: number, y: number, size: number) {
   const spans = line.map((segment) => `<tspan xml:space="preserve"${segment.emphasized ? ' fill="#ff5c46" text-decoration="underline" text-decoration-thickness="3"' : ""}>${escapeXml(segment.text)}</tspan>`).join("");
   return `<text xml:space="preserve" x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="${size}" font-weight="700" fill="#f5f7f8">${spans}</text>`;
 }

@@ -16,7 +16,7 @@ export type PedagogyBriefInputRow = {
   optionC?: unknown;
   optionD?: unknown;
   optionE?: unknown;
-  /** Optional. "trick" = animated working layout (digits + arcs + step box + result). "passage" = whole reading passage on screen with the explained word highlighted. Blank = classic board. */
+  /** Optional. "trick" = animated working layout (digits + arcs + step box + result). "concept" = topic teaching slide (topic name + notes, no question/solution labels). "passage" = whole reading passage on screen with the explained word highlighted. Blank = classic board. */
   layout?: unknown;
   /** Optional, trick layout only: the working row, e.g. "12 × 236". Carries forward when blank. */
   working?: unknown;
@@ -49,7 +49,7 @@ export type PedagogyRow = {
   options: [string, string, string, string, string];
   effectiveQuestionText: string;
   effectiveOptions: [string, string, string, string, string];
-  layout: "board" | "trick" | "passage" | "diagram";
+  layout: "board" | "trick" | "passage" | "diagram" | "concept";
   /** Diagram name and step; "" and 0 on rows that are not diagram rows. */
   diagram: string;
   diagramStep: number;
@@ -141,13 +141,14 @@ function parsePause(value: unknown, sourceRow: number): "haan" | "nahi" {
   throw rowError(sourceRow, 'pause_after must be "haan", "nahi", or blank.');
 }
 
-function parseLayout(value: unknown, sourceRow: number): "board" | "trick" | "passage" | "diagram" {
+function parseLayout(value: unknown, sourceRow: number): "board" | "trick" | "passage" | "diagram" | "concept" {
   const text = valueAsText(value).trim().toLowerCase();
   if (!text || text === "board") return "board";
   if (text === "trick") return "trick";
   if (text === "passage") return "passage";
   if (text === "diagram") return "diagram";
-  throw rowError(sourceRow, 'layout must be "trick", "passage", "diagram", "board", or blank.');
+  if (text === "concept") return "concept";
+  throw rowError(sourceRow, 'layout must be "trick", "passage", "diagram", "concept", "board", or blank.');
 }
 
 /** Non-space characters of the working row; arc indexes count these, starting at 0. */
