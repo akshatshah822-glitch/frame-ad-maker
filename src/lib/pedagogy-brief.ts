@@ -28,6 +28,8 @@ export type PedagogyBriefInputRow = {
   diagram?: unknown;
   /** Optional, diagram layout only: how many steps of the diagram are drawn (1 = first step). Blank = same as the row before. */
   diagramStep?: unknown;
+  /** Optional, diagram layout only: language of the words inside the drawing, "en" or "hi". Blank = carry forward, else "hi". */
+  diagramLabels?: unknown;
 };
 
 export type PedagogyArc = { from: number; to: number; below: boolean };
@@ -53,6 +55,7 @@ export type PedagogyRow = {
   /** Diagram name and step; "" and 0 on rows that are not diagram rows. */
   diagram: string;
   diagramStep: number;
+  diagramLabels: "hi" | "en";
   working: string;
   effectiveWorking: string;
   arcs: string;
@@ -194,6 +197,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       result: valueAsText(input.result),
       diagramName: valueAsText(input.diagram).trim().toLowerCase(),
       diagramStepText: valueAsText(input.diagramStep).trim(),
+      diagramLabelsText: valueAsText(input.diagramLabels).trim().toLowerCase(),
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
@@ -206,6 +210,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedResult = "";
   let retainedDiagram = "";
   let retainedDiagramStep = 0;
+  let retainedDiagramLabels: "hi" | "en" = "hi";
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row, index) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -229,6 +234,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     if (index > 0 && row.questionId !== rows[index - 1].questionId) {
       retainedDiagram = "";
       retainedDiagramStep = 0;
+      retainedDiagramLabels = "hi";
     }
     let diagram = "";
     let diagramStep = 0;
@@ -242,14 +248,20 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
         if (!Number.isInteger(step) || step < 1 || step > steps) throw rowError(row.sourceRow, `diagram_step must be a whole number from 1 to ${steps} for ${retainedDiagram}.`);
         retainedDiagramStep = step;
       } else if (!retainedDiagramStep) retainedDiagramStep = 1;
+      if (row.diagramLabelsText) {
+        if (row.diagramLabelsText !== "en" && row.diagramLabelsText !== "hi") throw rowError(row.sourceRow, 'diagram_labels must be "en", "hi", or blank.');
+        retainedDiagramLabels = row.diagramLabelsText;
+      }
       diagram = retainedDiagram;
       diagramStep = retainedDiagramStep;
     }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    const { diagramName, diagramStepText, ...rest } = row;
+    const { diagramName, diagramStepText, diagramLabelsText, ...rest } = row;
     void diagramName;
     void diagramStepText;
-    return { ...rest, diagram, diagramStep, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    void diagramLabelsText;
+    const diagramLabels = row.layout === "diagram" ? retainedDiagramLabels : "hi";
+    return { ...rest, diagram, diagramStep, diagramLabels, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 
