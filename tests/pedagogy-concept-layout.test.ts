@@ -18,7 +18,8 @@ test("concept slide shows the topic and notes, never QUESTION or SOLUTION", asyn
   assert.match(svg, /TOPIC/);
   assert.match(svg, /खेत तक पानी के तीन रास्ते/);
   assert.doesNotMatch(svg, /QUESTION|SOLUTION/);
-  assert.match(svg, /text-decoration="underline"/);
+  assert.match(svg, /fill="#ffd166"/);
+  assert.match(svg, /Georgia/);
 });
 
 test("concept notes respect the per-video size cap", async () => {

@@ -12,7 +12,8 @@ export const DIAGRAM_FRAME_SECONDS = 1 / 20;
 type DiagramElement = { step: number; svg: string };
 type DiagramDefinition = { steps: number; elements: DiagramElement[] };
 
-const SANS = "Arial, sans-serif";
+const SANS = "Georgia, 'Times New Roman', serif";
+const LABEL = "Arial, sans-serif";
 const BOARD = { x: 60, y: 120, width: 1180, height: 920 };
 const NOTES = { x: 1280, y: 120, width: 580, height: 920, padding: 40 };
 const WATER = "#4fa3ff";
@@ -82,7 +83,7 @@ async function textWidth(text: string, size: number) {
   const key = `${size}|${text}`;
   let width = widthCache.get(key);
   if (!width) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(text.length * size * 1.2 + 40)}" height="${Math.ceil(size * 2)}"><text x="10" y="${Math.round(size * 1.4)}" font-family="${SANS}" font-size="${size}" font-weight="800" fill="#000">${escapeXml(text)}</text></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(text.length * size * 1.2 + 40)}" height="${Math.ceil(size * 2)}"><text x="10" y="${Math.round(size * 1.4)}" font-family="${SANS}" font-size="${size}" fill="#000">${escapeXml(text)}</text></svg>`;
     width = sharp(Buffer.from(svg)).trim().png().toBuffer({ resolveWithObject: true }).then(({ info }) => info.width).catch(() => text.length * size * 0.5);
     widthCache.set(key, width);
   }
@@ -126,16 +127,16 @@ export async function createDiagramSlideSvg(state: DiagramSlideState, progress =
   const emphasis = state.emphasis.trim();
   const noteText = notes.lines.map((line, index) => {
     const colour = emphasis && line.includes(emphasis) ? "#ffd166" : line.includes("✗") ? "#ff8a7a" : "#eef1f7";
-    return `<text x="${NOTES.x + NOTES.padding}" y="${NOTES.y + 130 + index * notes.lineHeight}" font-family="${SANS}" font-size="${notes.size}" font-weight="${index === 0 ? 800 : 500}" fill="${colour}">${escapeXml(line)}</text>`;
+    return `<text x="${NOTES.x + NOTES.padding}" y="${NOTES.y + 130 + index * notes.lineHeight}" font-family="${SANS}" font-size="${notes.size}" fill="${colour}">${escapeXml(line)}</text>`;
   }).join("");
   return `<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
     <rect width="1920" height="1080" fill="#101a30"/><rect width="1920" height="10" fill="${MISSING}"/>
-    <text x="80" y="80" font-family="${SANS}" font-size="26" font-weight="800" fill="#bfc9dc">${escapeXml(state.title)}</text>
-    <text x="1840" y="80" text-anchor="end" font-family="${SANS}" font-size="24" font-weight="800" fill="${MISSING}">${escapeXml(state.timeLabel)}</text>
+    <text x="80" y="80" font-family="${SANS}" font-size="34" fill="#ffd166">${escapeXml(state.title)}</text>
+    <text x="1840" y="80" text-anchor="end" font-family="${LABEL}" font-size="24" font-weight="800" fill="${MISSING}">${escapeXml(state.timeLabel)}</text>
     <rect x="${BOARD.x}" y="${BOARD.y}" width="${BOARD.width}" height="${BOARD.height}" rx="22" fill="#16213d" stroke="#33415c" stroke-width="2"/>
     ${drawn}
     <rect x="${NOTES.x}" y="${NOTES.y}" width="${NOTES.width}" height="${NOTES.height}" rx="22" fill="#16213d" stroke="${MISSING}" stroke-width="3"/>
-    <text x="${NOTES.x + NOTES.padding}" y="${NOTES.y + 60}" font-family="${SANS}" font-size="22" font-weight="800" letter-spacing="4" fill="${MISSING}">NOTES</text>
+    <text x="${NOTES.x + NOTES.padding}" y="${NOTES.y + 60}" font-family="${LABEL}" font-size="22" font-weight="800" letter-spacing="4" fill="${MISSING}">NOTES</text>
     ${noteText}
   </svg>`;
 }
