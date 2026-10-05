@@ -55,9 +55,47 @@ function threeSources(): DiagramDefinition {
   return { steps: 3, elements: [{ step: 1, svg: farm }, { step: 1, svg: cloud }, { step: 2, svg: ground }, { step: 3, svg: canal }] };
 }
 
+
+const arrow = (x1: number, y1: number, x2: number, y2: number, colour: string, width = 5) => {
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  const head = [[x2, y2], [x2 - 18 * Math.cos(angle - 0.5), y2 - 18 * Math.sin(angle - 0.5)], [x2 - 18 * Math.cos(angle + 0.5), y2 - 18 * Math.sin(angle + 0.5)]].map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${colour}" stroke-width="${width}" stroke-linecap="round"/><polygon points="${head}" fill="${colour}"/>`;
+};
+
+/** Gaining river (groundwater seeps up into the river), then losing river (river seeps down), then: one water. */
+function gainingLosingRiver(): DiagramDefinition {
+  // One cross-section per half of the board: ground, water table, river channel.
+  const section = (x: number, waterTableY: number, title: string) =>
+    `<rect x="${x}" y="420" width="500" height="460" fill="#4a3a2a"/>` +
+    `<rect x="${x}" y="${waterTableY}" width="500" height="${880 - waterTableY}" fill="#1f4f7a"/>` +
+    `<line x1="${x}" y1="${waterTableY}" x2="${x + 500}" y2="${waterTableY}" stroke="${WATER_TEXT}" stroke-width="3" stroke-dasharray="14 10"/>` +
+    `<path d="M${x + 170} 420 Q ${x + 250} 540 ${x + 330} 420 Z" fill="${WATER}"/>` +
+    label(x + 250, 400, "नदी") + label(x + 470, waterTableY + 40, "भूजल", WATER_TEXT, 26, "end") + label(x + 250, 260, title, "#eef1f7", 32);
+  const gaining = section(110, 470, "1. Gaining river") + arrow(260, 640, 300, 500, FIELD) + arrow(400, 640, 360, 500, FIELD) + label(360, 320, "भूजल → नदी", FIELD, 30);
+  const losing = section(650, 760, "2. Losing river") + arrow(860, 470, 820, 690, MISSING) + arrow(940, 470, 980, 690, MISSING) + label(900, 320, "नदी → भूजल", MISSING, 30);
+  const oneWater = `<rect x="110" y="920" width="1040" height="70" rx="14" fill="#16213d" stroke="#ffd166" stroke-width="3"/>${label(630, 967, "नदी + भूजल = एक ही पानी", "#ffd166", 32)}`;
+  return { steps: 3, elements: [{ step: 1, svg: gaining }, { step: 2, svg: losing }, { step: 3, svg: oneWater }] };
+}
+
+/** Canal missing -> tubewell -> power subsidy -> over-extraction -> water table falls (and the loop back). */
+function subsidyCycle(): DiagramDefinition {
+  const node = (x: number, y: number, text: string, stroke: string) => box(x, y, 380, 90, text, "#22304f", stroke, "#eef1f7", 30);
+  return {
+    steps: 4,
+    elements: [
+      { step: 1, svg: node(160, 200, "नहर नहीं बनी ✗", MISSING) },
+      { step: 2, svg: arrow(540, 245, 720, 245, WATER_TEXT) + node(730, 200, "ट्यूबवेल (बिजली चाहिए)", WATER_TEXT) },
+      { step: 3, svg: arrow(920, 300, 920, 470, WATER_TEXT) + node(730, 480, "बिजली सब्सिडी", "#ffd166") },
+      { step: 4, svg: arrow(720, 525, 540, 525, WATER_TEXT) + node(160, 480, "बेहिसाब पानी खींचना", MISSING) + arrow(350, 580, 350, 750, MISSING) + node(160, 760, "जल स्तर हर साल नीचे", MISSING) + `<path d="M540 805 L 1170 805 L 1170 245 L 1125 245" stroke="${MISSING}" stroke-width="4" fill="none" stroke-dasharray="12 10"/>` + label(600, 930, "और गहरा ट्यूबवेल → चक्र चलता रहता है", MISSING, 28, "start") },
+    ],
+  };
+}
+
 const DIAGRAMS: Record<string, DiagramDefinition> = {
   "canal-network": canalNetwork(),
   "three-sources": threeSources(),
+  "gaining-losing-river": gainingLosingRiver(),
+  "subsidy-cycle": subsidyCycle(),
 };
 
 export const diagramNames = Object.keys(DIAGRAMS);
