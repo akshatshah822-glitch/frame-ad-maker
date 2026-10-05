@@ -59,3 +59,18 @@ test("river and subsidy diagrams build in the teacher's order", async () => {
   const cycle2 = await createDiagramSlideSvg({ ...base, diagram: "subsidy-cycle", step: 2 });
   assert.ok(cycle2.includes("ट्यूबवेल") && !cycle2.includes("बिजली सब्सिडी"));
 });
+
+test("diagram_labels=en draws English words inside the diagram; old briefs stay Hindi", async () => {
+  const rows = validatePedagogyRows([
+    base({ layout: "diagram", diagram: "canal-network", diagramStep: "4", diagramLabels: "en" }, 2),
+    base({ layout: "diagram" }, 3),
+    base({ questionId: "S1", layout: "diagram", diagram: "subsidy-cycle", diagramStep: "4" }, 4),
+  ]);
+  assert.deepEqual(rows.map((row) => row.diagramLabels), ["en", "en", "hi"]);
+  assert.throws(() => validatePedagogyRows([base({ layout: "diagram", diagram: "canal-network", diagramLabels: "fr" }, 5)]), /Row 5: diagram_labels must be/);
+  const state = { diagram: "canal-network", step: 4, board: "IPC vs IPU", emphasis: "", title: "T", timeLabel: "0:00" };
+  const english = await createDiagramSlideSvg({ ...state, labels: "en" });
+  assert.ok(english.includes(">Main canal<") && english.includes(">Village<") && !/[ऀ-ॿ]/.test(english.replace(/<text[^>]*>IPC vs IPU<\/text>/, "")));
+  const hindi = await createDiagramSlideSvg(state);
+  assert.ok(hindi.includes(">बड़ी नहर<"));
+});

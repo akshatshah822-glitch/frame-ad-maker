@@ -49,8 +49,8 @@ function canalNetwork(): DiagramDefinition {
 /** Three ways water reaches a farm: rain from above, groundwater from below, canal from the side. */
 function threeSources(): DiagramDefinition {
   const farm = `<rect x="560" y="470" width="300" height="150" rx="12" fill="#2f4a2a" stroke="${FIELD}" stroke-width="3"/>${[600, 660, 720, 780, 820].map((x) => `<line x1="${x}" y1="600" x2="${x}" y2="520" stroke="${FIELD}" stroke-width="4"/>`).join("")}${label(880, 555, "खेत", "#cfeec9", 30, "start")}`;
-  const cloud = `<ellipse cx="710" cy="220" rx="150" ry="55" fill="#33415c"/><ellipse cx="640" cy="200" rx="70" ry="50" fill="#33415c"/><ellipse cx="780" cy="195" rx="80" ry="55" fill="#33415c"/>${[630, 690, 750, 810].map((x) => `<line x1="${x}" y1="290" x2="${x - 15}" y2="430" stroke="${WATER}" stroke-width="5" stroke-dasharray="18 14"/>`).join("")}${label(960, 230, "1. ऊपर से: बारिश", WATER_TEXT, 30, "start")}`;
-  const ground = `<rect x="200" y="700" width="1000" height="90" fill="#4a3a2a"/><rect x="200" y="840" width="1000" height="80" rx="8" fill="#1f4f7a"/>${label(1180, 895, "भूजल", WATER_TEXT, 28, "end")}<line x1="710" y1="620" x2="710" y2="860" stroke="#c9ced8" stroke-width="10"/><path d="M690 700 L710 660 L730 700" fill="#c9ced8"/>${label(960, 760, "2. नीचे से: ट्यूबवेल", WATER_TEXT, 30, "start")}`;
+  const cloud = `<ellipse cx="710" cy="220" rx="150" ry="55" fill="#33415c"/><ellipse cx="640" cy="200" rx="70" ry="50" fill="#33415c"/><ellipse cx="780" cy="195" rx="80" ry="55" fill="#33415c"/>${[630, 690, 750, 810].map((x) => `<line x1="${x}" y1="290" x2="${x - 15}" y2="430" stroke="${WATER}" stroke-width="5" stroke-dasharray="18 14"/>`).join("")}${label(1215, 230, "1. ऊपर से: बारिश", WATER_TEXT, 30, "end")}`;
+  const ground = `<rect x="200" y="700" width="1000" height="90" fill="#4a3a2a"/><rect x="200" y="840" width="1000" height="80" rx="8" fill="#1f4f7a"/>${label(1180, 895, "भूजल", WATER_TEXT, 28, "end")}<line x1="710" y1="620" x2="710" y2="860" stroke="#c9ced8" stroke-width="10"/><path d="M690 700 L710 660 L730 700" fill="#c9ced8"/>${label(1185, 760, "2. नीचे से: ट्यूबवेल", WATER_TEXT, 30, "end")}`;
   const canal = `${river(150)}<line x1="170" y1="545" x2="560" y2="545" stroke="${WATER}" stroke-width="18" stroke-linecap="round"/>${label(360, 515, "3. बगल से: नहर")}`;
   return { steps: 3, elements: [{ step: 1, svg: farm }, { step: 1, svg: cloud }, { step: 2, svg: ground }, { step: 3, svg: canal }] };
 }
@@ -100,6 +100,38 @@ const DIAGRAMS: Record<string, DiagramDefinition> = {
 
 export const diagramNames = Object.keys(DIAGRAMS);
 
+/** English labels for every Hindi label drawn in the diagrams (longest phrases first, so parts are not replaced early). */
+const ENGLISH_LABELS: [string, string][] = ([
+  ["और गहरा ट्यूबवेल → चक्र चलता रहता है", "Deeper tubewell → the cycle repeats"],
+  ["नदी + भूजल = एक ही पानी", "River + groundwater = one water"],
+  ["ट्यूबवेल (बिजली चाहिए)", "Tubewell (needs power)"],
+  ["जल स्तर हर साल नीचे", "Water table falls every year"],
+  ["बेहिसाब पानी खींचना", "Unchecked pumping"],
+  ["2. नीचे से: ट्यूबवेल", "2. From below: tubewell"],
+  ["IPC: बनाई गई क्षमता", "IPC: capacity created"],
+  ["Last mile नहीं बनी", "Last mile not built"],
+  ["1. ऊपर से: बारिश", "1. From above: rainfall"],
+  ["3. बगल से: नहर", "3. From the side: canal"],
+  ["नहर नहीं बनी ✗", "Canal not built ✗"],
+  ["IPU: असल उपयोग", "IPU: actually used"],
+  ["बिजली सब्सिडी", "Power subsidy"],
+  ["भूजल → नदी", "Groundwater → river"],
+  ["नदी → भूजल", "River → groundwater"],
+  ["छोटी नहरें", "Distributaries"],
+  ["बड़ी नहर", "Main canal"],
+  ["भूजल", "Groundwater"],
+  ["गाँव", "Village"],
+  ["खेत", "Farm"],
+  ["नदी", "River"],
+] as [string, string][]).toSorted((a, b) => b[0].length - a[0].length);
+
+export type DiagramLabelLanguage = "hi" | "en";
+
+function localise(svg: string, language: DiagramLabelLanguage) {
+  if (language === "hi") return svg;
+  return ENGLISH_LABELS.reduce((text, [hindi, english]) => text.replaceAll(`>${hindi}<`, `>${english}<`), svg);
+}
+
 /** Number of steps in a diagram, or 0 when FRAME does not know the name. */
 export function diagramStepCount(name: string) {
   return DIAGRAMS[name]?.steps ?? 0;
@@ -112,6 +144,8 @@ export type DiagramSlideState = {
   emphasis: string;
   title: string;
   timeLabel: string;
+  /** Language of the words drawn inside the diagram; Hindi when not given. */
+  labels?: DiagramLabelLanguage;
   /** Upper limit for the notes text size; the renderer sets one value per video. */
   maxFontSize?: number;
 };
@@ -159,7 +193,10 @@ export async function createDiagramSlideSvg(state: DiagramSlideState, progress =
   const opacity = Math.min(1, Math.max(0, progress));
   const drawn = definition.elements
     .filter((element) => element.step <= state.step)
-    .map((element) => element.step === state.step ? `<g opacity="${opacity.toFixed(2)}">${element.svg}</g>` : element.svg)
+    .map((element) => {
+      const svg = localise(element.svg, state.labels ?? "hi");
+      return element.step === state.step ? `<g opacity="${opacity.toFixed(2)}">${svg}</g>` : svg;
+    })
     .join("");
   const notes = await wrapNotes(state.board, state.maxFontSize ?? 40);
   const emphasis = state.emphasis.trim();
