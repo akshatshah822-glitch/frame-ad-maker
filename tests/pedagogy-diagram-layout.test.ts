@@ -40,10 +40,22 @@ test("each step adds drawing, and the newest step fades in with progress", async
   assert.match(fadingStart, /<g opacity="0.00">/);
   assert.equal(diagramStepCount("canal-network"), 4);
   assert.equal(diagramStepCount("three-sources"), 3);
+  assert.equal(diagramStepCount("gaining-losing-river"), 3);
+  assert.equal(diagramStepCount("subsidy-cycle"), 4);
 });
 
 test("notes text respects the per-video size cap", async () => {
   const state = { diagram: "three-sources", step: 3, board: "खेत तक पानी के 3 रास्ते", emphasis: "", title: "T", timeLabel: "0:00" };
   assert.equal(await diagramSlideFontSize(state), 40);
   assert.equal(await diagramSlideFontSize({ ...state, maxFontSize: 30 }), 30);
+});
+
+test("river and subsidy diagrams build in the teacher's order", async () => {
+  const base = { board: "नोट्स", emphasis: "", title: "T", timeLabel: "0:00" };
+  const river1 = await createDiagramSlideSvg({ ...base, diagram: "gaining-losing-river", step: 1 });
+  assert.ok(river1.includes("Gaining river") && !river1.includes("Losing river"));
+  const river3 = await createDiagramSlideSvg({ ...base, diagram: "gaining-losing-river", step: 3 });
+  assert.ok(river3.includes("एक ही पानी"));
+  const cycle2 = await createDiagramSlideSvg({ ...base, diagram: "subsidy-cycle", step: 2 });
+  assert.ok(cycle2.includes("ट्यूबवेल") && !cycle2.includes("बिजली सब्सिडी"));
 });
