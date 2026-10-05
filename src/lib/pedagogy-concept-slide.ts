@@ -36,29 +36,34 @@ async function textWidth(text: string, size: number) {
   return width;
 }
 
-type PlacedWord = { text: string; start: number; end: number; x: number; line: number; width: number };
+type NoteLine = { text: string; start: number };
 
+/** Width of a line prefix including trailing spaces (a sentinel letter keeps the trim from eating them). */
+async function prefixWidth(text: string, size: number) {
+  if (!text) return 0;
+  return (await textWidth(`${text}H`, size)) - (await textWidth("H", size));
+}
+
+/** Wraps whole lines by measuring the real text, so the renderer's own word spacing is kept. */
 async function layoutNotes(board: string, cap: number) {
   const maxWidth = NOTES.width - NOTES.padding * 2;
   const maxHeight = NOTES.height - 150;
   for (let size = Math.min(56, cap); size >= 24; size -= 2) {
-    const space = Math.max(size * 0.25, await textWidth("a a", size) - 2 * await textWidth("a", size));
-    const placed: PlacedWord[] = [];
-    let line = 0;
+    const lines: NoteLine[] = [];
     let offset = 0;
-    for (const [index, paragraph] of board.split("\n").entries()) {
-      if (index > 0) line += 1;
-      let x = 0;
+    for (const paragraph of board.split("\n")) {
+      let current: NoteLine | null = null;
       for (const match of paragraph.matchAll(/\S+/g)) {
-        const width = await textWidth(match[0], size);
-        if (x > 0 && x + width > maxWidth) { line += 1; x = 0; }
-        placed.push({ text: match[0], start: offset + match.index!, end: offset + match.index! + match[0].length, x, line, width });
-        x += width + space;
+        const start = offset + match.index!;
+        const candidate: string = current ? board.slice(current.start, start + match[0].length) : match[0];
+        if (current && await textWidth(candidate, size) > maxWidth) { lines.push(current); current = { text: match[0], start }; }
+        else current = current ? { text: candidate, start: current.start } : { text: match[0], start };
       }
+      lines.push(current ?? { text: "", start: offset });
       offset += paragraph.length + 1;
     }
     const lineHeight = Math.round(size * 1.55);
-    if ((line + 1) * lineHeight <= maxHeight) return { placed, size, lineHeight };
+    if (lines.length * lineHeight <= maxHeight) return { lines, size, lineHeight };
   }
   throw new Error("Concept notes do not fit at the minimum readable size.");
 }
@@ -70,27 +75,32 @@ export async function conceptSlideFontSize(state: ConceptSlideState) {
 
 export async function createConceptSlideSvg(state: ConceptSlideState) {
   const layout = await layoutNotes(state.board, state.maxFontSize ?? 56);
-  const highlight = phraseRanges(state.board, emphasisPhrases(state.emphasis));
+  const highlight = phraseRanges(state.board, emphasisPhrases(state.emphasis)).toSorted((a, b) => a[0] - b[0]);
   const firstY = NOTES.y + 130;
+  const x = NOTES.x + NOTES.padding;
   const marks: string[] = [];
   const text: string[] = [];
-  // Neighbouring highlighted words on one line share one box, so a phrase reads as one marked unit.
-  let run: { line: number; x0: number; x1: number } | null = null;
-  const closeRun = () => {
-    if (!run) return;
-    const y = firstY + run.line * layout.lineHeight;
-    marks.push(`<rect x="${(NOTES.x + NOTES.padding + run.x0 - 6).toFixed(1)}" y="${(y - layout.size * 0.95).toFixed(1)}" width="${(run.x1 - run.x0 + 12).toFixed(1)}" height="${(layout.size * 1.3).toFixed(1)}" rx="8" fill="#ffd166"/>`);
-    run = null;
-  };
-  for (const word of layout.placed) {
-    const x = NOTES.x + NOTES.padding + word.x;
-    const y = firstY + word.line * layout.lineHeight;
-    const isHighlighted = highlight.some(([a, b]) => word.start < b && word.end > a);
-    if (isHighlighted && run && run.line === word.line) run.x1 = word.x + word.width;
-    else { closeRun(); if (isHighlighted) run = { line: word.line, x0: word.x, x1: word.x + word.width }; }
-    text.push(`<text x="${x.toFixed(1)}" y="${y}" font-family="${SERIF}" font-size="${layout.size}" fill="${isHighlighted ? "#1b1b2f" : "#eef1f7"}">${escapeXml(word.text)}</text>`);
+  for (const [index, line] of layout.lines.entries()) {
+    const y = firstY + index * layout.lineHeight;
+    const lineEnd = line.start + line.text.length;
+    // Highlighted parts of this line, as character offsets inside the line.
+    const parts = highlight
+      .map(([a, b]) => [Math.max(a, line.start) - line.start, Math.min(b, lineEnd) - line.start] as [number, number])
+      .filter(([a, b]) => b > a);
+    const spans: string[] = [];
+    let cursor = 0;
+    for (const [a, b] of parts) {
+      if (a < cursor) continue;
+      const x0 = await prefixWidth(line.text.slice(0, a), layout.size);
+      const x1 = await prefixWidth(line.text.slice(0, b), layout.size);
+      marks.push(`<rect x="${(x + x0 - 3).toFixed(1)}" y="${(y - layout.size * 0.95).toFixed(1)}" width="${(x1 - x0 + 6).toFixed(1)}" height="${(layout.size * 1.3).toFixed(1)}" rx="8" fill="#ffd166"/>`);
+      if (a > cursor) spans.push(`<tspan>${escapeXml(line.text.slice(cursor, a))}</tspan>`);
+      spans.push(`<tspan fill="#1b1b2f">${escapeXml(line.text.slice(a, b))}</tspan>`);
+      cursor = b;
+    }
+    if (cursor < line.text.length) spans.push(`<tspan>${escapeXml(line.text.slice(cursor))}</tspan>`);
+    text.push(`<text xml:space="preserve" x="${x}" y="${y}" font-family="${SERIF}" font-size="${layout.size}" fill="#eef1f7">${spans.join("")}</text>`);
   }
-  closeRun();
   return `<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
     <rect width="1920" height="1080" fill="#0e1424"/><rect width="1920" height="10" fill="#ffd166"/>
     <text x="120" y="100" font-family="Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="5" fill="#9fb3d1">TOPIC</text>
