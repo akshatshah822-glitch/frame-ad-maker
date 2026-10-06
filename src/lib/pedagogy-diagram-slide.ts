@@ -93,11 +93,39 @@ function subsidyCycle(): DiagramDefinition {
   };
 }
 
+
+/** Equality vs equity: three viewers of different heights behind a wall at a cricket match. */
+function equalityEquity(): DiagramDefinition {
+  const ground = 860;
+  const wallTop = 640;
+  const panel = (x0: number, boxes: number[], title: string, colour: string) => {
+    const people = [120, 250, 380].map((dx, i) => {
+      const height = [150, 200, 250][i];
+      const stack = boxes[i];
+      const feet = ground - stack * 60;
+      const top = feet - height;
+      const sees = top < wallTop - 10;
+      const crates = Array.from({ length: stack }, (_, k) => `<rect x="${x0 + dx - 40}" y="${ground - (k + 1) * 60}" width="80" height="56" rx="6" fill="#8a6a3a" stroke="#c9a46a" stroke-width="2"/>`).join("");
+      const body = `<rect x="${x0 + dx - 22}" y="${top + 44}" width="44" height="${height - 44}" rx="16" fill="#9fb3d1"/><circle cx="${x0 + dx}" cy="${top + 22}" r="22" fill="#eef1f7"/>`;
+      const mark = `<text x="${x0 + dx}" y="${top - 16}" text-anchor="middle" font-family="${SANS}" font-size="38" fill="${sees ? FIELD : MISSING}">${sees ? "✓" : "✗"}</text>`;
+      return crates + body + mark;
+    }).join("");
+    const field = `<rect x="${x0}" y="200" width="500" height="120" rx="12" fill="#2f4a2a"/>${label(x0 + 250, 272, "ક્રિકેટ મેચ", "#cfeec9", 30)}`;
+    const wall = `<rect x="${x0}" y="${wallTop}" width="500" height="${ground - wallTop}" fill="#4a3a2a" opacity="0.55"/>${label(x0 + 470, wallTop + 36, "દીવાલ", "#c9a46a", 24, "end")}`;
+    return `${label(x0 + 250, 170, title, colour, 34)}${field}${wall}${people}<line x1="${x0}" y1="${ground}" x2="${x0 + 500}" y2="${ground}" stroke="#c9ced8" stroke-width="3"/>`;
+  };
+  const equality = panel(90, [1, 1, 1], "1. સમાનતા (Equality)", WATER_TEXT);
+  const equity = panel(650, [2, 1, 0], "2. સમતા (Equity)", FIELD);
+  const banner = `<rect x="90" y="905" width="1060" height="90" rx="14" fill="#16213d" stroke="#ffd166" stroke-width="3"/>${label(620, 962, "જેને જેટલી જરૂર, એટલી મદદ = સમતા", "#ffd166", 34)}`;
+  return { steps: 3, elements: [{ step: 1, svg: equality }, { step: 2, svg: equity }, { step: 3, svg: banner }] };
+}
+
 const DIAGRAMS: Record<string, DiagramDefinition> = {
   "canal-network": canalNetwork(),
   "three-sources": threeSources(),
   "gaining-losing-river": gainingLosingRiver(),
   "subsidy-cycle": subsidyCycle(),
+  "equality-equity": equalityEquity(),
 };
 
 export const diagramNames = Object.keys(DIAGRAMS);
@@ -105,6 +133,11 @@ export const diagramNames = Object.keys(DIAGRAMS);
 /** English labels for every Hindi label drawn in the diagrams (longest phrases first, so parts are not replaced early). */
 const ENGLISH_LABELS: [string, string][] = ([
   ["और गहरा ट्यूबवेल → चक्र चलता रहता है", "Deeper tubewell → the cycle repeats"],
+  ["જેને જેટલી જરૂર, એટલી મદદ = સમતા", "Help as per need = Equity"],
+  ["1. સમાનતા (Equality)", "1. Equality"],
+  ["2. સમતા (Equity)", "2. Equity"],
+  ["ક્રિકેટ મેચ", "Cricket match"],
+  ["દીવાલ", "Wall"],
   ["नदी + भूजल = एक ही पानी", "River + groundwater = one water"],
   ["ट्यूबवेल (बिजली चाहिए)", "Tubewell (needs power)"],
   ["जल स्तर हर साल नीचे", "Water table falls every year"],
