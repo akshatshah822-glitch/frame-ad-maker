@@ -1,5 +1,6 @@
 import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 import { diagramNames, diagramStepCount } from "@/lib/pedagogy-diagram-slide";
+import { INFOGRAPHIC_KINDS, INFOGRAPHIC_MAX_ITEMS, infographicItems, isInfographic } from "@/lib/pedagogy-infographic";
 export const pedagogyRequiredColumns = ["question_id", "line_no", "time", "sir_ka_vaakya", "board"] as const;
 
 export type PedagogyBriefInputRow = {
@@ -31,6 +32,8 @@ export type PedagogyBriefInputRow = {
   diagramStep?: unknown;
   /** Optional, diagram layout only: language of the words inside the drawing, "en" or "hi". Blank = carry forward, else "hi". */
   diagramLabels?: unknown;
+  /** Optional, infographic diagrams only (flow, cards, timeline, compare): items separated by "|". Carries forward within a question. */
+  diagramItems?: unknown;
 };
 
 export type PedagogyArc = { from: number; to: number; below: boolean };
@@ -57,6 +60,8 @@ export type PedagogyRow = {
   diagram: string;
   diagramStep: number;
   diagramLabels: "hi" | "en";
+  /** Items of an infographic diagram (flow, cards, timeline, compare); empty for drawn diagrams. */
+  diagramItems: string[];
   working: string;
   effectiveWorking: string;
   arcs: string;
@@ -199,6 +204,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       diagramName: valueAsText(input.diagram).trim().toLowerCase(),
       diagramStepText: valueAsText(input.diagramStep).trim(),
       diagramLabelsText: valueAsText(input.diagramLabels).trim().toLowerCase(),
+      diagramItemsText: valueAsText(input.diagramItems).trim(),
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
@@ -212,6 +218,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedDiagram = "";
   let retainedDiagramStep = 0;
   let retainedDiagramLabels: "hi" | "en" = "hi";
+  let retainedDiagramItems: string[] = [];
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row, index) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -236,14 +243,22 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       retainedDiagram = "";
       retainedDiagramStep = 0;
       retainedDiagramLabels = "hi";
+      retainedDiagramItems = [];
     }
     let diagram = "";
     let diagramStep = 0;
     if (row.layout === "diagram") {
-      if (row.diagramName && row.diagramName !== retainedDiagram) retainedDiagramStep = 0;
+      if (row.diagramName && row.diagramName !== retainedDiagram) { retainedDiagramStep = 0; retainedDiagramItems = []; }
       if (row.diagramName) retainedDiagram = row.diagramName;
-      const steps = diagramStepCount(retainedDiagram);
-      if (!steps) throw rowError(row.sourceRow, `diagram ${JSON.stringify(retainedDiagram)} is not a FRAME diagram. Use one of: ${diagramNames.join(", ")}.`);
+      if (row.diagramItemsText) { retainedDiagramItems = infographicItems(row.diagramItemsText); retainedDiagramStep = 0; }
+      let steps = diagramStepCount(retainedDiagram);
+      if (isInfographic(retainedDiagram)) {
+        const max = INFOGRAPHIC_MAX_ITEMS[retainedDiagram];
+        if (!retainedDiagramItems.length) throw rowError(row.sourceRow, `diagram ${retainedDiagram} needs diagram_items (items separated by "|").`);
+        if (retainedDiagramItems.length > max) throw rowError(row.sourceRow, `diagram ${retainedDiagram} takes at most ${max} items; this row has ${retainedDiagramItems.length}.`);
+        steps = retainedDiagramItems.length;
+      }
+      if (!steps) throw rowError(row.sourceRow, `diagram ${JSON.stringify(retainedDiagram)} is not a FRAME diagram. Use one of: ${[...diagramNames, ...INFOGRAPHIC_KINDS].join(", ")}.`);
       if (row.diagramStepText) {
         const step = Number(row.diagramStepText);
         if (!Number.isInteger(step) || step < 1 || step > steps) throw rowError(row.sourceRow, `diagram_step must be a whole number from 1 to ${steps} for ${retainedDiagram}.`);
@@ -257,12 +272,14 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       diagramStep = retainedDiagramStep;
     }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    const { diagramName, diagramStepText, diagramLabelsText, ...rest } = row;
+    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, ...rest } = row;
     void diagramName;
     void diagramStepText;
     void diagramLabelsText;
+    void diagramItemsText;
+    const diagramItems = row.layout === "diagram" && isInfographic(diagram) ? retainedDiagramItems : [];
     const diagramLabels = row.layout === "diagram" ? retainedDiagramLabels : "hi";
-    return { ...rest, diagram, diagramStep, diagramLabels, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 

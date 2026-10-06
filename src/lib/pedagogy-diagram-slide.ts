@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
+import { infographicElements, isInfographic } from "@/lib/pedagogy-infographic";
 
 /**
  * "Diagram" layout: a board diagram that builds step by step while the teacher explains,
@@ -147,6 +148,8 @@ export type DiagramSlideState = {
   timeLabel: string;
   /** Language of the words drawn inside the diagram; Hindi when not given. */
   labels?: DiagramLabelLanguage;
+  /** Items for an infographic diagram (flow, cards, timeline, compare). */
+  items?: string[];
   /** Upper limit for the notes text size; the renderer sets one value per video. */
   maxFontSize?: number;
 };
@@ -189,7 +192,9 @@ export async function diagramSlideFontSize(state: DiagramSlideState) {
 
 /** progress: 0 = the newest step is invisible, 1 = fully drawn. */
 export async function createDiagramSlideSvg(state: DiagramSlideState, progress = 1) {
-  const definition = DIAGRAMS[state.diagram];
+  const definition = isInfographic(state.diagram)
+    ? { steps: state.items?.length ?? 0, elements: await infographicElements(state.diagram, state.items ?? []) }
+    : DIAGRAMS[state.diagram];
   if (!definition) throw new Error(`Unknown diagram "${state.diagram}".`);
   const opacity = Math.min(1, Math.max(0, progress));
   const drawn = definition.elements

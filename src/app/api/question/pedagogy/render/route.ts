@@ -30,7 +30,7 @@ function suppliedRows(value: unknown): PedagogyBriefInputRow[] {
       sourceRow: Number(row.sourceRow), questionId: row.questionId, lineNo: row.lineNo, time: row.sourceTime,
       narration: row.narration, board: row.board, emphasis: row.emphasis, pauseAfter: row.pauseAfter,
       questionText: row.questionText, optionA: options[0], optionB: options[1], optionC: options[2], optionD: options[3], optionE: options[4],
-      layout: row.layout, working: row.working, arcs: row.arcs, result: row.result, diagram: row.diagram, diagramStep: row.diagramStep, diagramLabels: row.diagramLabels,
+      layout: row.layout, working: row.working, arcs: row.arcs, result: row.result, diagram: row.diagram, diagramStep: row.diagramStep, diagramLabels: row.diagramLabels, diagramItems: Array.isArray(row.diagramItems) ? row.diagramItems.join(" | ") : row.diagramItems,
     };
   });
 }
