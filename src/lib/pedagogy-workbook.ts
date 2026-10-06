@@ -33,5 +33,6 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     diagram: row.diagram,
     diagramStep: row.diagram_step,
     diagramLabels: row.diagram_labels,
+    diagramItems: row.diagram_items,
   } satisfies PedagogyBriefInputRow));
 }

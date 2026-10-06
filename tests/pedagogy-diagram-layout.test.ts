@@ -74,3 +74,20 @@ test("diagram_labels=en draws English words inside the diagram; old briefs stay 
   const hindi = await createDiagramSlideSvg(state);
   assert.ok(hindi.includes(">बड़ी नहर<"));
 });
+
+test("infographics (flow, cards, timeline, compare) take their items from the brief and reveal one per step", async () => {
+  const rows = validatePedagogyRows([
+    base({ questionId: "LD", layout: "diagram", diagram: "cards", diagramItems: "A = one | B = two | C = three", diagramStep: "1" }, 2),
+    base({ questionId: "LD", layout: "diagram", diagramStep: "3" }, 3),
+  ]);
+  assert.deepEqual(rows[1].diagramItems, ["A = one", "B = two", "C = three"]);
+  assert.equal(rows[1].diagramStep, 3);
+  assert.throws(() => validatePedagogyRows([base({ layout: "diagram", diagram: "flow" }, 4)]), /Row 4: diagram flow needs diagram_items/);
+  assert.throws(() => validatePedagogyRows([base({ layout: "diagram", diagram: "compare", diagramItems: "a | b | c" }, 5)]), /Row 5: diagram compare takes at most 2 items/);
+  assert.throws(() => validatePedagogyRows([base({ layout: "diagram", diagram: "timeline", diagramItems: "1992 = x | 1995 = y", diagramStep: "3" }, 6)]), /Row 6: diagram_step must be a whole number from 1 to 2/);
+  const state = { diagram: "timeline", items: ["1992 = RCI એક્ટ", "2016 = RPwD એક્ટ"], board: "કાયદા", emphasis: "", title: "T", timeLabel: "0:00" };
+  const first = await createDiagramSlideSvg({ ...state, step: 1 });
+  assert.ok(first.includes("RCI એક્ટ") && !first.includes("RPwD"));
+  const both = await createDiagramSlideSvg({ ...state, step: 2 });
+  assert.ok(both.includes("RPwD એક્ટ"));
+});

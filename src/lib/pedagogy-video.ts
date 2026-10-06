@@ -82,7 +82,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   };
   const diagramState = (index: number): DiagramSlideState => {
     const row = timeline.rows[index];
-    return { diagram: row.diagram, step: row.diagramStep, board: row.effectiveBoard, emphasis: row.emphasis, title: row.effectiveQuestionText.trim() || row.questionId, timeLabel: row.adjustedGeneratedTimeLabel, labels: row.diagramLabels };
+    return { diagram: row.diagram, step: row.diagramStep, board: row.effectiveBoard, emphasis: row.emphasis, title: row.effectiveQuestionText.trim() || row.questionId, timeLabel: row.adjustedGeneratedTimeLabel, labels: row.diagramLabels, items: row.diagramItems };
   };
   const conceptState = (index: number): ConceptSlideState => {
     const row = timeline.rows[index];
