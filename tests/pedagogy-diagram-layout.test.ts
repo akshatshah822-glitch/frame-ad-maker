@@ -91,3 +91,12 @@ test("infographics (flow, cards, timeline, compare) take their items from the br
   const both = await createDiagramSlideSvg({ ...state, step: 2 });
   assert.ok(both.includes("RPwD એક્ટ"));
 });
+
+test("equality-equity draws equality first, then equity, then the takeaway", async () => {
+  assert.equal(diagramStepCount("equality-equity"), 3);
+  const base2 = { diagram: "equality-equity", board: "નોંધ", emphasis: "", title: "T", timeLabel: "0:00" };
+  const one = await createDiagramSlideSvg({ ...base2, step: 1 });
+  assert.ok(one.includes("સમાનતા (Equality)") && !one.includes("સમતા (Equity)") && one.includes("✗"));
+  const three = await createDiagramSlideSvg({ ...base2, step: 3 });
+  assert.ok(three.includes("જેને જેટલી જરૂર, એટલી મદદ"));
+});
