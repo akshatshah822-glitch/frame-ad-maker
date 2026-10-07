@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import sharp from "sharp";
 
 /**
@@ -7,11 +9,13 @@ import sharp from "sharp";
  *   cards     "Title = text | Title = text"                   up to 6 cards in a grid
  *   timeline  "1992 = RCI Act | 1995 = PWD Act"               years on a line, events beside them
  *   compare   "Equality = same for all | Equity = as needed"  two columns side by side
+ *   image     "potter.png = Clay is shaped when it is ready"  pictures from the pedagogy-images folder, caption optional;
+ *             the newest picture fades in and zooms up to full size
  * One item appears per step (diagram_step), in the order written, like a teacher writing on the board.
  */
-export const INFOGRAPHIC_KINDS = ["flow", "cards", "timeline", "compare"] as const;
+export const INFOGRAPHIC_KINDS = ["flow", "cards", "timeline", "compare", "image"] as const;
 export type InfographicKind = (typeof INFOGRAPHIC_KINDS)[number];
-export const INFOGRAPHIC_MAX_ITEMS: Record<InfographicKind, number> = { flow: 6, cards: 6, timeline: 6, compare: 2 };
+export const INFOGRAPHIC_MAX_ITEMS: Record<InfographicKind, number> = { flow: 6, cards: 6, timeline: 6, compare: 2, image: 4 };
 
 export function isInfographic(name: string): name is InfographicKind {
   return (INFOGRAPHIC_KINDS as readonly string[]).includes(name);
@@ -75,12 +79,74 @@ function arrowDown(x: number, y1: number, y2: number, colour: string) {
   return `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2 - 14}" stroke="${colour}" stroke-width="5" stroke-linecap="round"/><polygon points="${x - 12},${y2 - 18} ${x + 12},${y2 - 18} ${x},${y2}" fill="${colour}"/>`;
 }
 
-/** One SVG fragment per item; element i is drawn from step i + 1. */
-export async function infographicElements(kind: InfographicKind, items: string[]) {
+/** Pictures live on the laptop in <project>/pedagogy-images (not in git: partner material stays local). */
+export const PEDAGOGY_IMAGE_FOLDER = "pedagogy-images";
+const SAFE_IMAGE_NAME = /^[\w.-]+\.(png|jpe?g|webp)$/i;
+type LoadedImage = { href: string; width: number; height: number } | null;
+const imageCache = new Map<string, Promise<LoadedImage>>();
+
+/** Loads a brief picture once per file. Logs which path ran: the picture, or the placeholder and why. */
+export function loadPedagogyImage(file: string, folder = join(process.cwd(), PEDAGOGY_IMAGE_FOLDER)) {
+  const key = `${folder}|${file}`;
+  let loaded = imageCache.get(key);
+  if (!loaded) {
+    loaded = (async (): Promise<LoadedImage> => {
+      if (!SAFE_IMAGE_NAME.test(file) || basename(file) !== file) {
+        console.warn("Pedagogy image", { file, path: "placeholder", reason: "name must be a plain .png, .jpg or .webp file name" });
+        return null;
+      }
+      try {
+        const { data, info } = await sharp(await readFile(join(folder, file))).resize({ width: 1400, height: 1400, fit: "inside", withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true });
+        console.info("Pedagogy image", { file, path: "picture", width: info.width, height: info.height });
+        return { href: `data:image/png;base64,${data.toString("base64")}`, width: info.width, height: info.height };
+      } catch (error) {
+        console.warn("Pedagogy image", { file, path: "placeholder", reason: error instanceof Error ? error.message : String(error) });
+        return null;
+      }
+    })();
+    imageCache.set(key, loaded);
+  }
+  return loaded;
+}
+
+/** One SVG fragment per item; element i is drawn from step i + 1. `zoom` marks the centre a new picture grows from. */
+export async function infographicElements(kind: InfographicKind, items: string[], imageFolder?: string) {
   const parsed = items.map(splitItem);
   const n = parsed.length;
-  const elements: { step: number; svg: string }[] = [];
-  if (kind === "flow") {
+  const elements: { step: number; svg: string; zoom?: [number, number] }[] = [];
+  if (kind === "image") {
+    const pictures = await Promise.all(parsed.map((item) => loadPedagogyImage(item.title, imageFolder)));
+    // Two wide pictures read better stacked; tall ones sit side by side.
+    const wide = pictures.every((picture) => !picture || picture.width > picture.height * 1.2);
+    const columns = n === 1 ? 1 : n === 2 && wide ? 1 : 2;
+    const rows = Math.ceil(n / columns);
+    const gap = 30;
+    const width = (BOARD.width - 80 - gap * (columns - 1)) / columns;
+    const height = (BOARD.height - 80 - gap * (rows - 1)) / rows;
+    for (const [i, item] of parsed.entries()) {
+      const x = BOARD.x + 40 + (i % columns) * (width + gap);
+      const y = BOARD.y + 40 + Math.floor(i / columns) * (height + gap);
+      const caption = item.text ? await fit(item.text, width - 40, 110, 36, 24) : { lines: [], size: 36 };
+      const captionHeight = caption.lines.length ? caption.lines.length * caption.size * 1.3 + 20 : 0;
+      const picture = pictures[i];
+      let body: string;
+      let w = width - 20, h = height - captionHeight - 20;
+      if (picture) {
+        const scale = Math.min(w / picture.width, h / picture.height);
+        w = picture.width * scale; h = picture.height * scale;
+      }
+      // Picture and caption are centred together in the cell, caption right under the picture.
+      const top = y + (height - h - captionHeight) / 2;
+      const left = x + (width - w) / 2;
+      if (picture) {
+        body = `<image href="${picture.href}" x="${left.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
+      } else {
+        body = `<rect x="${left.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="16" fill="none" stroke="#ff8a7a" stroke-width="3" stroke-dasharray="14 10"/>${textBlock([`picture missing: ${item.title}`], x + width / 2, top + h / 2, 30, "#ff8a7a", "middle")}`;
+      }
+      const captionSvg = textBlock(caption.lines, x + width / 2, top + h + 14 + caption.size, caption.size, "#ffd166", "middle");
+      elements.push({ step: i + 1, svg: `${body}${captionSvg}`, zoom: [x + width / 2, y + height / 2] });
+    }
+  } else if (kind === "flow") {
     const gap = 46;
     const boxHeight = Math.min(130, (BOARD.height - 80 - gap * (n - 1)) / n);
     const width = 980;

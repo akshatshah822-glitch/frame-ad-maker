@@ -234,7 +234,11 @@ export async function createDiagramSlideSvg(state: DiagramSlideState, progress =
     .filter((element) => element.step <= state.step)
     .map((element) => {
       const svg = localise(element.svg, state.labels ?? "hi");
-      return element.step === state.step ? `<g opacity="${opacity.toFixed(2)}">${svg}</g>` : svg;
+      if (element.step !== state.step) return svg;
+      // A new picture also grows from 85% to full size while it fades in.
+      const zoom = (element as { zoom?: [number, number] }).zoom ?? null;
+      const grow = zoom ? ` transform="translate(${zoom[0]} ${zoom[1]}) scale(${(0.85 + 0.15 * opacity).toFixed(3)}) translate(${-zoom[0]} ${-zoom[1]})"` : "";
+      return `<g opacity="${opacity.toFixed(2)}"${grow}>${svg}</g>`;
     })
     .join("");
   const notes = await wrapNotes(state.board, state.maxFontSize ?? 40);
