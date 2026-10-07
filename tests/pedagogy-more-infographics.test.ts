@@ -44,3 +44,20 @@ test("stairs: each step stands higher than the last", async () => {
   const svg = await createDiagramSlideSvg({ diagram: "stairs", step: 3, board: "નોંધ", emphasis: "", title: "t", timeLabel: "0:00", items: ["0-2 = One", "2-7 = Two", "7-11 = Three"] });
   assert.match(svg, /7-11/);
 });
+
+test("an item ending in '@ file.png' draws that picture inside its box", async () => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const sharp = (await import("sharp")).default;
+  const folder = await mkdtemp(join(tmpdir(), "frame-item-pic-"));
+  await writeFile(join(folder, "baby.png"), await sharp({ create: { width: 60, height: 50, channels: 3, background: "#ffcc99" } }).png().toBuffer());
+  for (const kind of ["timeline", "table", "stairs", "cards", "compare"] as const) {
+    const elements = await infographicElements(kind, ["Infancy = birth to 2 @ baby.png", "Childhood = 2 to 6"], folder);
+    const withPicture = elements.filter((e) => e.svg.includes("data:image/png;base64,"));
+    assert.equal(withPicture.length, 1, kind);
+    assert.doesNotMatch(elements.map((e) => e.svg).join(""), /baby\.png/, `${kind}: file name must not be shown as text`);
+  }
+  const [missing] = await infographicElements("cards", ["Gone = x @ gone.png"], folder);
+  assert.match(missing.svg, /missing: gone.png/);
+});
