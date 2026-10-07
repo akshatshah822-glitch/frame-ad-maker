@@ -13,6 +13,8 @@ import sharp from "sharp";
  *   hub       "Child = 5 aspects | Physical = clay, sand"    first item in the centre, the rest around it (mind map)
  *   venn      "Growth = size | Development = behaviour"      2 or 3 overlapping circles; optional last item = the overlap
  *   stairs    "0-2 = Sensorimotor | 2-7 = Preoperational"    steps rising left to right, one per item
+ * Any item of cards, timeline, compare, table or stairs can end with "@ picture.png" (from the pedagogy-images
+ * folder): the picture is drawn inside that item's box, e.g. "Infancy = birth to 2 weeks @ infant.png".
  *   image     "potter.png = Clay is shaped when it is ready"  pictures from the pedagogy-images folder, caption optional;
  *             the newest picture fades in and zooms up to full size
  * One item appears per step (diagram_step), in the order written, like a teacher writing on the board.
@@ -29,10 +31,15 @@ export function infographicItems(text: string) {
   return text.split("|").map((item) => item.trim()).filter(Boolean);
 }
 
-type Item = { title: string; text: string };
-function splitItem(item: string): Item {
+type Item = { title: string; text: string; picture?: string };
+/** "Title = text @ picture.png": the optional picture goes inside that item's box. */
+const ITEM_PICTURE = /\s*@\s*([\w.-]+\.(?:png|jpe?g|webp))\s*$/i;
+function splitItem(raw: string): Item {
+  const picture = ITEM_PICTURE.exec(raw)?.[1];
+  const item = picture ? raw.replace(ITEM_PICTURE, "") : raw;
   const at = item.indexOf("=");
-  return at < 0 ? { title: item, text: "" } : { title: item.slice(0, at).trim(), text: item.slice(at + 1).trim() };
+  const parts = at < 0 ? { title: item.trim(), text: "" } : { title: item.slice(0, at).trim(), text: item.slice(at + 1).trim() };
+  return picture ? { ...parts, picture } : parts;
 }
 
 const SERIF = "Georgia, 'Times New Roman', serif";
@@ -78,6 +85,21 @@ async function fit(text: string, maxWidth: number, maxHeight: number, start: num
 
 const textBlock = (lines: string[], x: number, y: number, size: number, colour: string, anchor = "start") =>
   lines.map((line, index) => `<text x="${x}" y="${(y + index * size * 1.3).toFixed(1)}" text-anchor="${anchor}" font-family="${SERIF}" font-size="${size}" fill="${colour}">${escapeXml(line)}</text>`).join("");
+
+/** A picture fitted inside a box on a small white card; a visible placeholder if the file is missing. */
+async function framedPicture(file: string, box: { x: number; y: number; w: number; h: number }, id: string, folder?: string) {
+  const picture = await loadPedagogyImage(file, folder);
+  const pad = 7;
+  if (!picture) {
+    return `<rect x="${box.x.toFixed(1)}" y="${box.y.toFixed(1)}" width="${box.w.toFixed(1)}" height="${box.h.toFixed(1)}" rx="12" fill="none" stroke="#ff8a7a" stroke-width="2" stroke-dasharray="8 6"/><text x="${(box.x + box.w / 2).toFixed(1)}" y="${(box.y + box.h / 2).toFixed(1)}" text-anchor="middle" font-family="${SERIF}" font-size="18" fill="#ff8a7a">missing: ${escapeXml(file)}</text>`;
+  }
+  const scale = Math.min((box.w - pad * 2) / picture.width, (box.h - pad * 2) / picture.height);
+  const w = picture.width * scale, h = picture.height * scale;
+  const x = box.x + (box.w - w) / 2, y = box.y + (box.h - h) / 2;
+  return `<defs><clipPath id="${id}"><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="8"/></clipPath></defs>`
+    + `<rect x="${(x - pad).toFixed(1)}" y="${(y - pad).toFixed(1)}" width="${(w + pad * 2).toFixed(1)}" height="${(h + pad * 2).toFixed(1)}" rx="12" fill="#ffffff"/>`
+    + `<image href="${picture.href}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="xMidYMid meet" clip-path="url(#${id})"/>`;
+}
 
 function arrowDown(x: number, y1: number, y2: number, colour: string) {
   return `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2 - 14}" stroke="${colour}" stroke-width="5" stroke-linecap="round"/><polygon points="${x - 12},${y2 - 18} ${x + 12},${y2 - 18} ${x},${y2}" fill="${colour}"/>`;
@@ -180,10 +202,14 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const x = BOARD.x + 40 + (i % columns) * (width + gap);
       const y = BOARD.y + 40 + Math.floor(i / columns) * (height + gap);
       const colour = COLOURS[i % COLOURS.length];
-      const title = await fit(item.title, width - 50, Math.min(120, height * 0.4), 44);
+      // A card with a picture keeps its words on the left and the picture on the right.
+      const pw = item.picture ? Math.min(width * 0.45, (height - 30) * 1.4) : 0;
+      const textWidth = width - 50 - (pw ? pw + 16 : 0);
+      const pictureSvg = item.picture ? await framedPicture(item.picture, { x: x + width - pw - 14, y: y + 14, w: pw, h: height - 28 }, `cd-${i}`, imageFolder) : "";
+      const title = await fit(item.title, textWidth, Math.min(120, height * 0.4), 44);
       const titleHeight = title.lines.length * title.size * 1.3;
-      const body = item.text ? await fit(item.text, width - 50, height - titleHeight - 50, 40) : { lines: [], size: 40 };
-      elements.push({ step: i + 1, svg: `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${width.toFixed(1)}" height="${height.toFixed(1)}" rx="18" fill="#22304f" stroke="${colour}" stroke-width="3"/><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="12" height="${height.toFixed(1)}" rx="6" fill="${colour}"/>${textBlock(title.lines, x + 34, y + 20 + title.size, title.size, colour)}${textBlock(body.lines, x + 34, y + 34 + titleHeight + body.size, body.size, "#eef1f7")}` });
+      const body = item.text ? await fit(item.text, textWidth, height - titleHeight - 50, 40) : { lines: [], size: 40 };
+      elements.push({ step: i + 1, svg: `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${width.toFixed(1)}" height="${height.toFixed(1)}" rx="18" fill="#22304f" stroke="${colour}" stroke-width="3"/><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="12" height="${height.toFixed(1)}" rx="6" fill="${colour}"/>${textBlock(title.lines, x + 34, y + 20 + title.size, title.size, colour)}${textBlock(body.lines, x + 34, y + 34 + titleHeight + body.size, body.size, "#eef1f7")}${pictureSvg}`, zoom: item.picture ? [x + width / 2, y + height / 2] : undefined });
     }
   } else if (kind === "timeline") {
     const lineX = BOARD.x + 210;
@@ -192,25 +218,29 @@ export async function infographicElements(kind: InfographicKind, items: string[]
     for (const [i, item] of parsed.entries()) {
       const y = BOARD.y + 60 + spacing * (i + 0.5);
       const colour = COLOURS[i % COLOURS.length];
-      const body = await fit(item.text || item.title, BOARD.width - 330, spacing - 20, 40);
+      const ph = item.picture ? Math.min(spacing - 10, 150) : 0, pw = ph * 1.2;
+      const pictureSvg = item.picture ? await framedPicture(item.picture, { x: BOARD.x + BOARD.width - 30 - pw, y: y - ph / 2, w: pw, h: ph }, `tl-${i}`, imageFolder) : "";
+      const body = await fit(item.text || item.title, BOARD.width - 330 - (pw ? pw + 30 : 0), spacing - 20, 40);
       const top = y - ((body.lines.length - 1) * body.size * 1.3) / 2 + body.size * 0.35;
-      elements.push({ step: i + 1, svg: `<text x="${lineX - 40}" y="${(y + 14).toFixed(1)}" text-anchor="end" font-family="${SERIF}" font-size="40" fill="${colour}">${escapeXml(item.text ? item.title : "")}</text><circle cx="${lineX}" cy="${y.toFixed(1)}" r="16" fill="${colour}"/>${textBlock(body.lines, lineX + 44, top, body.size, "#eef1f7")}` });
+      elements.push({ step: i + 1, svg: `<text x="${lineX - 40}" y="${(y + 14).toFixed(1)}" text-anchor="end" font-family="${SERIF}" font-size="40" fill="${colour}">${escapeXml(item.text ? item.title : "")}</text><circle cx="${lineX}" cy="${y.toFixed(1)}" r="16" fill="${colour}"/>${textBlock(body.lines, lineX + 44, top, body.size, "#eef1f7")}${pictureSvg}`, zoom: item.picture ? [BOARD.x + BOARD.width / 2, y] : undefined });
     }
   } else if (kind === "table") {
     const [left, right] = [0.42, 0.58].map((share) => (BOARD.width - 80) * share);
     const x = BOARD.x + 40;
-    const rowHeight = Math.min(130, (BOARD.height - 80) / n);
+    const rowHeight = Math.min(parsed.some((item) => item.picture) ? 150 : 130, (BOARD.height - 80) / n);
     for (const [i, item] of parsed.entries()) {
       const y = BOARD.y + 40 + i * rowHeight;
       const header = i === 0;
       const size = header ? 40 : 34;
-      const a = await fit(item.title, left - 40, rowHeight - 16, size, 22);
+      const tw = item.picture ? rowHeight - 12 : 0;
+      const pictureSvg = item.picture ? await framedPicture(item.picture, { x: x + 10, y: y + 6, w: tw, h: tw }, `tb-${i}`, imageFolder) : "";
+      const a = await fit(item.title, left - 40 - (tw ? tw + 12 : 0), rowHeight - 16, size, 22);
       const b = await fit(item.text, right - 40, rowHeight - 16, size, 22);
       const lineTop = (block: { lines: string[]; size: number }) => y + rowHeight / 2 - ((block.lines.length - 1) * block.size * 1.3) / 2 + block.size * 0.35;
       const fill = header ? "#2b3f6b" : i % 2 ? "#1d2a47" : "#22304f";
       const bColour = header ? "#7fe08a" : "#eef1f7";
       const aColour = header ? "#4fa3ff" : "#ffd166";
-      elements.push({ step: i + 1, svg: `<rect x="${x}" y="${y.toFixed(1)}" width="${left + right}" height="${rowHeight.toFixed(1)}" rx="${header ? 14 : 0}" fill="${fill}"/><line x1="${x + left}" y1="${y.toFixed(1)}" x2="${x + left}" y2="${(y + rowHeight).toFixed(1)}" stroke="#33415c" stroke-width="2"/>${textBlock(a.lines, x + 24, lineTop(a), a.size, aColour)}${textBlock(b.lines, x + left + 24, lineTop(b), b.size, bColour)}` });
+      elements.push({ step: i + 1, svg: `<rect x="${x}" y="${y.toFixed(1)}" width="${left + right}" height="${rowHeight.toFixed(1)}" rx="${header ? 14 : 0}" fill="${fill}"/><line x1="${x + left}" y1="${y.toFixed(1)}" x2="${x + left}" y2="${(y + rowHeight).toFixed(1)}" stroke="#33415c" stroke-width="2"/>${pictureSvg}${textBlock(a.lines, x + 24 + (tw ? tw + 8 : 0), lineTop(a), a.size, aColour)}${textBlock(b.lines, x + left + 24, lineTop(b), b.size, bColour)}` });
     }
   } else if (kind === "hub") {
     const cx = BOARD.x + BOARD.width / 2, cy = BOARD.y + BOARD.height / 2;
@@ -256,17 +286,21 @@ export async function infographicElements(kind: InfographicKind, items: string[]
   } else if (kind === "stairs") {
     const gap = 14;
     const stepW = (BOARD.width - 80 - gap * (n - 1)) / n;
-    const rise = Math.min(120, (BOARD.height - 380) / Math.max(1, n - 1));
+    // Blocks with pictures start taller so the picture and the words both fit.
+    const base = parsed.some((item) => item.picture) ? 340 : 200;
+    const rise = Math.min(120, (BOARD.height - 180 - base) / Math.max(1, n - 1));
     for (const [i, item] of parsed.entries()) {
       const x = BOARD.x + 40 + i * (stepW + gap);
-      const blockTop = BOARD.y + BOARD.height - 60 - 200 - i * rise;
+      const blockTop = BOARD.y + BOARD.height - 60 - base - i * rise;
       const colour = COLOURS[i % COLOURS.length];
       const title = await fit(item.title, stepW - 24, 90, 34, 20);
-      const body = item.text ? await fit(item.text, stepW - 24, 200 + i * rise - 40, 34, 18) : { lines: [], size: 28 };
+      const pictureH = item.picture ? Math.min(150, stepW * 0.8) : 0;
+      const pictureSvg = item.picture ? await framedPicture(item.picture, { x: x + 10, y: blockTop + 22, w: stepW - 20, h: pictureH }, `st-${i}`, imageFolder) : "";
+      const body = item.text ? await fit(item.text, stepW - 24, base + i * rise - 50 - pictureH, 34, 18) : { lines: [], size: 28 };
       const height = BOARD.y + BOARD.height - 40 - blockTop;
       const labelTop = blockTop - 18 - (title.lines.length - 1) * title.size * 1.3;
       const arrow = i < n - 1 ? `<path d="M ${(x + stepW * 0.55).toFixed(1)} ${(labelTop - title.size - 10).toFixed(1)} q ${(stepW * 0.4).toFixed(1)} ${(-rise * 0.9).toFixed(1)} ${(stepW * 0.8).toFixed(1)} ${(-rise * 0.3).toFixed(1)}" fill="none" stroke="#9fb3d1" stroke-width="3" stroke-dasharray="8 6"/>` : "";
-      elements.push({ step: i + 1, svg: `<rect x="${x.toFixed(1)}" y="${blockTop.toFixed(1)}" width="${stepW.toFixed(1)}" height="${height.toFixed(1)}" rx="14" fill="#22304f" stroke="${colour}" stroke-width="3"/><rect x="${x.toFixed(1)}" y="${blockTop.toFixed(1)}" width="${stepW.toFixed(1)}" height="12" rx="6" fill="${colour}"/>${textBlock(title.lines, x + stepW / 2, labelTop, title.size, colour, "middle")}${textBlock(body.lines, x + stepW / 2, blockTop + 40 + body.size * 0.6, body.size, "#eef1f7", "middle")}${arrow}`, zoom: [x + stepW / 2, blockTop + height / 2] });
+      elements.push({ step: i + 1, svg: `<rect x="${x.toFixed(1)}" y="${blockTop.toFixed(1)}" width="${stepW.toFixed(1)}" height="${height.toFixed(1)}" rx="14" fill="#22304f" stroke="${colour}" stroke-width="3"/><rect x="${x.toFixed(1)}" y="${blockTop.toFixed(1)}" width="${stepW.toFixed(1)}" height="12" rx="6" fill="${colour}"/>${textBlock(title.lines, x + stepW / 2, labelTop, title.size, colour, "middle")}${pictureSvg}${textBlock(body.lines, x + stepW / 2, blockTop + 40 + pictureH + body.size * 0.6, body.size, "#eef1f7", "middle")}${arrow}`, zoom: [x + stepW / 2, blockTop + height / 2] });
     }
   } else {
     const width = (BOARD.width - 110) / 2;
@@ -277,9 +311,11 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const colour = i === 0 ? "#4fa3ff" : "#7fe08a";
       const title = await fit(item.title, width - 60, 140, 52);
       const titleHeight = title.lines.length * title.size * 1.3;
-      const body = await fit(item.text, width - 60, height - titleHeight - 90, 46);
-      const boxHeight = Math.min(height, 120 + titleHeight + body.lines.length * body.size * 1.3 + 40);
-      elements.push({ step: i + 1, svg: `<rect x="${x.toFixed(1)}" y="${y}" width="${width.toFixed(1)}" height="${boxHeight.toFixed(1)}" rx="20" fill="#22304f" stroke="${colour}" stroke-width="3"/>${textBlock(title.lines, x + width / 2, y + 30 + title.size, title.size, colour, "middle")}<line x1="${(x + 40).toFixed(1)}" y1="${(y + 50 + titleHeight).toFixed(1)}" x2="${(x + width - 40).toFixed(1)}" y2="${(y + 50 + titleHeight).toFixed(1)}" stroke="${colour}" stroke-width="2"/>${textBlock(body.lines, x + 30, y + 90 + titleHeight + body.size * 0.3, body.size, "#eef1f7")}` });
+      const pictureH = item.picture ? 300 : 0;
+      const pictureSvg = item.picture ? await framedPicture(item.picture, { x: x + 30, y: y + 70 + titleHeight, w: width - 60, h: pictureH }, `cp-${i}`, imageFolder) : "";
+      const body = await fit(item.text, width - 60, height - titleHeight - 90 - (pictureH ? pictureH + 40 : 0), 46);
+      const boxHeight = Math.min(height, 120 + titleHeight + pictureH + body.lines.length * body.size * 1.3 + 40);
+      elements.push({ step: i + 1, svg: `<rect x="${x.toFixed(1)}" y="${y}" width="${width.toFixed(1)}" height="${boxHeight.toFixed(1)}" rx="20" fill="#22304f" stroke="${colour}" stroke-width="3"/>${textBlock(title.lines, x + width / 2, y + 30 + title.size, title.size, colour, "middle")}<line x1="${(x + 40).toFixed(1)}" y1="${(y + 50 + titleHeight).toFixed(1)}" x2="${(x + width - 40).toFixed(1)}" y2="${(y + 50 + titleHeight).toFixed(1)}" stroke="${colour}" stroke-width="2"/>${pictureSvg}${textBlock(body.lines, x + 30, y + 90 + titleHeight + (pictureH ? pictureH + 40 : 0) + body.size * 0.3, body.size, "#eef1f7")}` });
     }
   }
   return elements;
