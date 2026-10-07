@@ -9,13 +9,17 @@ import sharp from "sharp";
  *   cards     "Title = text | Title = text"                   up to 6 cards in a grid
  *   timeline  "1992 = RCI Act | 1995 = PWD Act"               years on a line, events beside them
  *   compare   "Equality = same for all | Equity = as needed"  two columns side by side
+ *   table     "Growth = Development | Physical = All-round"   first item is the header row, then one row per item
+ *   hub       "Child = 5 aspects | Physical = clay, sand"    first item in the centre, the rest around it (mind map)
+ *   venn      "Growth = size | Development = behaviour"      2 or 3 overlapping circles; optional last item = the overlap
+ *   stairs    "0-2 = Sensorimotor | 2-7 = Preoperational"    steps rising left to right, one per item
  *   image     "potter.png = Clay is shaped when it is ready"  pictures from the pedagogy-images folder, caption optional;
  *             the newest picture fades in and zooms up to full size
  * One item appears per step (diagram_step), in the order written, like a teacher writing on the board.
  */
-export const INFOGRAPHIC_KINDS = ["flow", "cards", "timeline", "compare", "image"] as const;
+export const INFOGRAPHIC_KINDS = ["flow", "cards", "timeline", "compare", "image", "table", "hub", "venn", "stairs"] as const;
 export type InfographicKind = (typeof INFOGRAPHIC_KINDS)[number];
-export const INFOGRAPHIC_MAX_ITEMS: Record<InfographicKind, number> = { flow: 6, cards: 6, timeline: 6, compare: 2, image: 4 };
+export const INFOGRAPHIC_MAX_ITEMS: Record<InfographicKind, number> = { flow: 6, cards: 6, timeline: 6, compare: 2, image: 4, table: 8, hub: 7, venn: 4, stairs: 6 };
 
 export function isInfographic(name: string): name is InfographicKind {
   return (INFOGRAPHIC_KINDS as readonly string[]).includes(name);
@@ -191,6 +195,78 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const body = await fit(item.text || item.title, BOARD.width - 330, spacing - 20, 40);
       const top = y - ((body.lines.length - 1) * body.size * 1.3) / 2 + body.size * 0.35;
       elements.push({ step: i + 1, svg: `<text x="${lineX - 40}" y="${(y + 14).toFixed(1)}" text-anchor="end" font-family="${SERIF}" font-size="40" fill="${colour}">${escapeXml(item.text ? item.title : "")}</text><circle cx="${lineX}" cy="${y.toFixed(1)}" r="16" fill="${colour}"/>${textBlock(body.lines, lineX + 44, top, body.size, "#eef1f7")}` });
+    }
+  } else if (kind === "table") {
+    const [left, right] = [0.42, 0.58].map((share) => (BOARD.width - 80) * share);
+    const x = BOARD.x + 40;
+    const rowHeight = Math.min(130, (BOARD.height - 80) / n);
+    for (const [i, item] of parsed.entries()) {
+      const y = BOARD.y + 40 + i * rowHeight;
+      const header = i === 0;
+      const size = header ? 40 : 34;
+      const a = await fit(item.title, left - 40, rowHeight - 16, size, 22);
+      const b = await fit(item.text, right - 40, rowHeight - 16, size, 22);
+      const lineTop = (block: { lines: string[]; size: number }) => y + rowHeight / 2 - ((block.lines.length - 1) * block.size * 1.3) / 2 + block.size * 0.35;
+      const fill = header ? "#2b3f6b" : i % 2 ? "#1d2a47" : "#22304f";
+      const bColour = header ? "#7fe08a" : "#eef1f7";
+      const aColour = header ? "#4fa3ff" : "#ffd166";
+      elements.push({ step: i + 1, svg: `<rect x="${x}" y="${y.toFixed(1)}" width="${left + right}" height="${rowHeight.toFixed(1)}" rx="${header ? 14 : 0}" fill="${fill}"/><line x1="${x + left}" y1="${y.toFixed(1)}" x2="${x + left}" y2="${(y + rowHeight).toFixed(1)}" stroke="#33415c" stroke-width="2"/>${textBlock(a.lines, x + 24, lineTop(a), a.size, aColour)}${textBlock(b.lines, x + left + 24, lineTop(b), b.size, bColour)}` });
+    }
+  } else if (kind === "hub") {
+    const cx = BOARD.x + BOARD.width / 2, cy = BOARD.y + BOARD.height / 2;
+    const [centre, ...spokes] = parsed;
+    const centreText = await fit(centre.text ? `${centre.title}: ${centre.text}` : centre.title, 250, 150, 40, 24);
+    const centreTop = cy - ((centreText.lines.length - 1) * centreText.size * 1.3) / 2 + centreText.size * 0.35;
+    elements.push({ step: 1, svg: `<circle cx="${cx}" cy="${cy}" r="150" fill="#2b3f6b" stroke="#ffd166" stroke-width="5"/>${textBlock(centreText.lines, cx, centreTop, centreText.size, "#ffd166", "middle")}`, zoom: [cx, cy] });
+    const rx = 395, ry = 320, boxW = 360, boxH = 170;
+    for (const [i, item] of spokes.entries()) {
+      const angle = -Math.PI / 2 + (i * 2 * Math.PI) / spokes.length;
+      const bx = cx + rx * Math.cos(angle), by = cy + ry * Math.sin(angle);
+      const colour = COLOURS[i % COLOURS.length];
+      const title = await fit(item.title, boxW - 30, 54, 40, 24);
+      const body = item.text ? await fit(item.text, boxW - 30, boxH - 34 - title.lines.length * title.size * 1.3, 32, 20) : { lines: [], size: 28 };
+      const top = by - boxH / 2;
+      const lx = cx + 150 * Math.cos(angle), ly = cy + 150 * Math.sin(angle);
+      elements.push({ step: i + 2, svg: `<line x1="${lx.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="${colour}" stroke-width="4" stroke-dasharray="10 8"/><rect x="${(bx - boxW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${boxW}" height="${boxH}" rx="18" fill="#22304f" stroke="${colour}" stroke-width="3"/>${textBlock(title.lines, bx, top + 18 + title.size, title.size, colour, "middle")}${textBlock(body.lines, bx, top + 30 + title.lines.length * title.size * 1.3 + body.size, body.size, "#eef1f7", "middle")}`, zoom: [bx, by] });
+    }
+  } else if (kind === "venn") {
+    const circles = parsed.slice(0, Math.min(3, n));
+    const overlap = n === 4 ? parsed[3] : null;
+    const r = circles.length === 2 ? 300 : 255;
+    const cx = BOARD.x + BOARD.width / 2, cy = BOARD.y + BOARD.height / 2 + (circles.length === 3 ? 30 : 0);
+    const centres: [number, number][] = circles.length === 2
+      ? [[cx - 170, cy], [cx + 170, cy]]
+      : [[cx, cy - 170], [cx - 190, cy + 130], [cx + 190, cy + 130]];
+    const labelAt = (i: number): [number, number] => {
+      const [x, y] = centres[i];
+      return [x + (x - cx) * (circles.length === 2 ? 0.75 : 0.5), y + (y - cy) * 0.5 + (circles.length === 2 ? -40 : 0)];
+    };
+    for (const [i, item] of circles.entries()) {
+      const colour = COLOURS[i % COLOURS.length];
+      const [x, y] = centres[i];
+      const [lx, ly] = labelAt(i);
+      const title = await fit(item.title, 230, 60, 40, 24);
+      const body = item.text ? await fit(item.text, 210, 120, 30, 20) : { lines: [], size: 28 };
+      elements.push({ step: i + 1, svg: `<circle cx="${x}" cy="${y}" r="${r}" fill="${colour}" fill-opacity="0.18" stroke="${colour}" stroke-width="4"/>${textBlock(title.lines, lx, ly - 20, title.size, colour, "middle")}${textBlock(body.lines, lx, ly + 22 + body.size * 0.5, body.size, "#eef1f7", "middle")}`, zoom: [x, y] });
+    }
+    if (overlap) {
+      const label = await fit(overlap.text ? `${overlap.title}: ${overlap.text}` : overlap.title, 150, 130, 30, 18);
+      elements.push({ step: 4, svg: `<circle cx="${cx}" cy="${cy - 10}" r="96" fill="#101a30" stroke="#ffd166" stroke-width="3"/>${textBlock(label.lines, cx, cy - 10 - ((label.lines.length - 1) * label.size * 1.3) / 2 + label.size * 0.35, label.size, "#ffd166", "middle")}`, zoom: [cx, cy] });
+    }
+  } else if (kind === "stairs") {
+    const gap = 14;
+    const stepW = (BOARD.width - 80 - gap * (n - 1)) / n;
+    const rise = Math.min(120, (BOARD.height - 380) / Math.max(1, n - 1));
+    for (const [i, item] of parsed.entries()) {
+      const x = BOARD.x + 40 + i * (stepW + gap);
+      const blockTop = BOARD.y + BOARD.height - 60 - 200 - i * rise;
+      const colour = COLOURS[i % COLOURS.length];
+      const title = await fit(item.title, stepW - 24, 90, 34, 20);
+      const body = item.text ? await fit(item.text, stepW - 24, 200 + i * rise - 40, 34, 18) : { lines: [], size: 28 };
+      const height = BOARD.y + BOARD.height - 40 - blockTop;
+      const labelTop = blockTop - 18 - (title.lines.length - 1) * title.size * 1.3;
+      const arrow = i < n - 1 ? `<path d="M ${(x + stepW * 0.55).toFixed(1)} ${(labelTop - title.size - 10).toFixed(1)} q ${(stepW * 0.4).toFixed(1)} ${(-rise * 0.9).toFixed(1)} ${(stepW * 0.8).toFixed(1)} ${(-rise * 0.3).toFixed(1)}" fill="none" stroke="#9fb3d1" stroke-width="3" stroke-dasharray="8 6"/>` : "";
+      elements.push({ step: i + 1, svg: `<rect x="${x.toFixed(1)}" y="${blockTop.toFixed(1)}" width="${stepW.toFixed(1)}" height="${height.toFixed(1)}" rx="14" fill="#22304f" stroke="${colour}" stroke-width="3"/><rect x="${x.toFixed(1)}" y="${blockTop.toFixed(1)}" width="${stepW.toFixed(1)}" height="12" rx="6" fill="${colour}"/>${textBlock(title.lines, x + stepW / 2, labelTop, title.size, colour, "middle")}${textBlock(body.lines, x + stepW / 2, blockTop + 40 + body.size * 0.6, body.size, "#eef1f7", "middle")}${arrow}`, zoom: [x + stepW / 2, blockTop + height / 2] });
     }
   } else {
     const width = (BOARD.width - 110) / 2;
