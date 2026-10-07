@@ -96,7 +96,7 @@ export function loadPedagogyImage(file: string, folder = join(process.cwd(), PED
         return null;
       }
       try {
-        const { data, info } = await sharp(await readFile(join(folder, file))).resize({ width: 1400, height: 1400, fit: "inside", withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true });
+        const { data, info } = await sharp(await readFile(join(folder, file))).resize({ width: 1800, height: 1800, fit: "inside", withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true });
         console.info("Pedagogy image", { file, path: "picture", width: info.width, height: info.height });
         return { href: `data:image/png;base64,${data.toString("base64")}`, width: info.width, height: info.height };
       } catch (error) {
@@ -130,7 +130,7 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const captionHeight = caption.lines.length ? caption.lines.length * caption.size * 1.3 + 20 : 0;
       const picture = pictures[i];
       let body: string;
-      let w = width - 20, h = height - captionHeight - 20;
+      let w = width - 60, h = height - captionHeight - 60;
       if (picture) {
         const scale = Math.min(w / picture.width, h / picture.height);
         w = picture.width * scale; h = picture.height * scale;
@@ -139,11 +139,17 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const top = y + (height - h - captionHeight) / 2;
       const left = x + (width - w) / 2;
       if (picture) {
-        body = `<image href="${picture.href}" x="${left.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
+        // The picture sits on a white rounded card with a soft shadow, so cut edges never show.
+        const pad = 14, clip = `pic-${i}`;
+        const cx = left - pad, cy = top - pad, cw = w + pad * 2, ch = h + pad * 2;
+        body = `<defs><clipPath id="${clip}"><rect x="${left.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="12"/></clipPath><filter id="${clip}-shadow" x="-10%" y="-10%" width="120%" height="130%"><feGaussianBlur stdDeviation="12"/></filter></defs>`
+          + `<rect x="${(cx + 4).toFixed(1)}" y="${(cy + 12).toFixed(1)}" width="${cw.toFixed(1)}" height="${ch.toFixed(1)}" rx="22" fill="#000" opacity="0.45" filter="url(#${clip}-shadow)"/>`
+          + `<rect x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" width="${cw.toFixed(1)}" height="${ch.toFixed(1)}" rx="22" fill="#ffffff"/>`
+          + `<image href="${picture.href}" x="${left.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="xMidYMid meet" clip-path="url(#${clip})"/>`;
       } else {
         body = `<rect x="${left.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="16" fill="none" stroke="#ff8a7a" stroke-width="3" stroke-dasharray="14 10"/>${textBlock([`picture missing: ${item.title}`], x + width / 2, top + h / 2, 30, "#ff8a7a", "middle")}`;
       }
-      const captionSvg = textBlock(caption.lines, x + width / 2, top + h + 14 + caption.size, caption.size, "#ffd166", "middle");
+      const captionSvg = textBlock(caption.lines, x + width / 2, top + h + 30 + caption.size, caption.size, "#ffd166", "middle");
       elements.push({ step: i + 1, svg: `${body}${captionSvg}`, zoom: [x + width / 2, y + height / 2] });
     }
   } else if (kind === "flow") {

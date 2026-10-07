@@ -42,11 +42,30 @@ test("a missing or unsafe picture draws a visible placeholder instead of failing
   assert.doesNotMatch(missing.svg + unsafe.svg, /<image /);
 });
 
-test("the newest picture fades in and grows; earlier pictures stay still", async () => {
+test("the newest picture eases in and grows; earlier pictures stay still", async () => {
   const state = { diagram: "image", step: 2, board: "નોંધ", emphasis: "", title: "ચિત્ર", timeLabel: "0:01", items: ["a.png", "b.png"] };
   const halfway = await createDiagramSlideSvg(state, 0.5);
-  assert.match(halfway, /<g opacity="0.50" transform="translate\([\d.]+ [\d.]+\) scale\(0.925\)/);
+  // Eased: halfway through the time, the picture is already 87.5% visible and nearly full size.
+  assert.match(halfway, /<g opacity="0.88" transform="translate\([\d.]+ [\d.]+\) scale\(0.985\)/);
   assert.equal((halfway.match(/scale\(/g) ?? []).length, 1);
   const done = await createDiagramSlideSvg(state, 1);
   assert.match(done, /scale\(1.000\)/);
+});
+
+test("a picture sits on a white rounded card with a shadow", async () => {
+  const folder = await folderWith("card.png", 400, 300);
+  const [element] = await infographicElements("image", ["card.png"], folder);
+  assert.match(element.svg, /fill="#ffffff"/);
+  assert.match(element.svg, /clip-path="url\(#pic-0\)"/);
+  assert.match(element.svg, /feGaussianBlur/);
+});
+
+test("a new topic dissolves from the previous slide", async () => {
+  const { crossfadeFrame } = await import("../src/lib/pedagogy-transition");
+  const folder = await mkdtemp(join(tmpdir(), "frame-fade-"));
+  const black = join(folder, "black.png");
+  await writeFile(black, await sharp({ create: { width: 4, height: 4, channels: 3, background: "#000000" } }).png().toBuffer());
+  const white = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#ffffff" } }).png().toBuffer();
+  const { data } = await sharp(await crossfadeFrame(black, white, 0.5)).raw().toBuffer({ resolveWithObject: true });
+  assert.ok(data[0] > 110 && data[0] < 145, `midpoint grey, got ${data[0]}`);
 });
