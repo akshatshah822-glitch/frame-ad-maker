@@ -229,7 +229,9 @@ export async function createDiagramSlideSvg(state: DiagramSlideState, progress =
     ? { steps: state.items?.length ?? 0, elements: await infographicElements(state.diagram, state.items ?? []) }
     : DIAGRAMS[state.diagram];
   if (!definition) throw new Error(`Unknown diagram "${state.diagram}".`);
-  const opacity = Math.min(1, Math.max(0, progress));
+  // Ease out: quick start, gentle landing, so nothing pops in at a constant speed.
+  const linear = Math.min(1, Math.max(0, progress));
+  const opacity = 1 - (1 - linear) ** 3;
   const drawn = definition.elements
     .filter((element) => element.step <= state.step)
     .map((element) => {
@@ -237,7 +239,7 @@ export async function createDiagramSlideSvg(state: DiagramSlideState, progress =
       if (element.step !== state.step) return svg;
       // A new picture also grows from 85% to full size while it fades in.
       const zoom = (element as { zoom?: [number, number] }).zoom ?? null;
-      const grow = zoom ? ` transform="translate(${zoom[0]} ${zoom[1]}) scale(${(0.85 + 0.15 * opacity).toFixed(3)}) translate(${-zoom[0]} ${-zoom[1]})"` : "";
+      const grow = zoom ? ` transform="translate(${zoom[0]} ${zoom[1]}) scale(${(0.88 + 0.12 * opacity).toFixed(3)}) translate(${-zoom[0]} ${-zoom[1]})"` : "";
       return `<g opacity="${opacity.toFixed(2)}"${grow}>${svg}</g>`;
     })
     .join("");

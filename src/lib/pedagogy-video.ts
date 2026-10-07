@@ -11,6 +11,7 @@ import { createTrickSlide, TRICK_ANIMATION_FRAMES, TRICK_FRAME_SECONDS } from "@
 import { createConceptSlide, conceptSlideFontSize, type ConceptSlideState } from "@/lib/pedagogy-concept-slide";
 import { createDiagramSlide, diagramSlideFontSize, DIAGRAM_ANIMATION_FRAMES, DIAGRAM_FRAME_SECONDS, type DiagramSlideState } from "@/lib/pedagogy-diagram-slide";
 import { probeFinalVideo } from "@/lib/video-qa";
+import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } from "@/lib/pedagogy-transition";
 
 const exec = promisify(execFile);
 
@@ -63,6 +64,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const totalDuration = timeline.totalDuration;
   const concatLines: string[] = [];
   let lastFrame = "";
+  let crossfades = 0;
   const trickRows = timeline.rows.filter((row) => row.layout === "trick").length;
   const passageRows = timeline.rows.filter((row) => row.layout === "passage").length;
   const diagramRows = timeline.rows.filter((row) => row.layout === "diagram").length;
@@ -124,10 +126,22 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         const frames = isNewStep ? DIAGRAM_ANIMATION_FRAMES : 1;
         const animationSeconds = isNewStep ? Math.min(DIAGRAM_ANIMATION_FRAMES * DIAGRAM_FRAME_SECONDS, row.allocatedDuration * 0.6) : 0;
         const frameSeconds = isNewStep ? animationSeconds / DIAGRAM_ANIMATION_FRAMES : 0;
+        // A new diagram topic dissolves in from the previous slide instead of cutting.
+        const newTopic = Boolean(lastFrame) && Boolean(previous) && previous.questionId !== row.questionId;
+        const transitionSeconds = newTopic ? Math.min(TOPIC_TRANSITION_SECONDS, row.allocatedDuration * 0.2) : 0;
+        if (newTopic) {
+          const incoming = await createDiagramSlide(state, 0);
+          for (let frame = 1; frame <= TOPIC_TRANSITION_FRAMES; frame += 1) {
+            const framePath = `${framePrefix}-t${String(frame).padStart(2, "0")}.png`;
+            await writeFile(framePath, await crossfadeFrame(lastFrame, incoming, frame / (TOPIC_TRANSITION_FRAMES + 1)));
+            concatLines.push(`file '${framePath}'`, `duration ${(transitionSeconds / TOPIC_TRANSITION_FRAMES).toFixed(6)}`);
+          }
+          crossfades += 1;
+        }
         for (let frame = 1; frame <= frames; frame += 1) {
           const framePath = `${framePrefix}-${String(frame).padStart(2, "0")}.png`;
           await writeFile(framePath, await createDiagramSlide(state, frame / frames));
-          const duration = frame === frames ? row.allocatedDuration - animationSeconds + frameSeconds : frameSeconds;
+          const duration = frame === frames ? row.allocatedDuration - animationSeconds - transitionSeconds + frameSeconds : frameSeconds;
           concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
           lastFrame = framePath;
         }
@@ -163,6 +177,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     }
     onProgress?.({ phase: "rendering-slides", completed: index + 1, total: rows.length });
   }
+  console.info("Pedagogy topic transitions", { path: crossfades ? "crossfade" : "cut", crossfades });
   concatLines.push(`file '${lastFrame}'`);
   const concatPath = join(directory, "timeline.txt");
   await writeFile(concatPath, concatLines.join("\n"));
