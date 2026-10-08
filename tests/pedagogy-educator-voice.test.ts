@@ -66,3 +66,11 @@ test("Gujarati narration switches the educator voice to eleven_v3; Hindi stays o
   assert.equal(pedagogyVoiceCacheIdentity(voice, "છ")?.model, "eleven_v3");
   assert.equal(pedagogyVoiceCacheIdentity(voice, "छह")?.model, "eleven_multilingual_v2");
 });
+
+test("educator narration is slowed to 0.9 and the speed is part of the audio cache identity", async () => {
+  const { EDUCATOR_VOICE_SPEED, pedagogyVoiceCacheIdentity } = await import("../src/lib/pedagogy-voice");
+  assert.equal(EDUCATOR_VOICE_SPEED, 0.9);
+  assert.equal(buildEducatorSpeechRequest("छह", "v").body.voice_settings.speed, 0.9);
+  const voice = { provider: "elevenlabs" as const, label: "educator" as const, voiceId: "v", consentRef: "c" };
+  assert.equal(pedagogyVoiceCacheIdentity(voice, "छह")?.speed, 0.9, "old faster audio is not reused from the cache");
+});
