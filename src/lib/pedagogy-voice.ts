@@ -58,6 +58,8 @@ export function resolvePedagogyVoice(env: Record<string, string | undefined> = p
 }
 
 export const EDUCATOR_VOICE_MODEL = "eleven_multilingual_v2";
+/** Educator narration pace (ElevenLabs allows 0.7 to 1.2; 1 = normal). Slowed for students: 1.0 sounded fast. */
+export const EDUCATOR_VOICE_SPEED = 0.9;
 /** eleven_multilingual_v2 cannot speak Gujarati; eleven_v3 can (ElevenLabs language list). */
 export const EDUCATOR_GUJARATI_VOICE_MODEL = "eleven_v3";
 const GUJARATI_SCRIPT = /[\u0A80-\u0AFF]/;
@@ -80,7 +82,7 @@ export function buildEducatorSpeechRequest(script: string, voiceId: string) {
   const stability = model === EDUCATOR_GUJARATI_VOICE_MODEL ? 0.5 : 0.45;
   return {
     url: `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
-    body: { text, model_id: model, voice_settings: { stability, similarity_boost: 0.8 } },
+    body: { text, model_id: model, voice_settings: { stability, similarity_boost: 0.8, speed: EDUCATOR_VOICE_SPEED } },
   };
 }
 
@@ -89,7 +91,7 @@ export function buildEducatorSpeechRequest(script: string, voiceId: string) {
  * The model follows the line's script, so Hindi lines keep their old cache keys.
  */
 export function pedagogyVoiceCacheIdentity(voice: PedagogyVoice = resolvePedagogyVoice(), script = "") {
-  return voice.provider === "openai" ? null : { provider: voice.provider, voiceId: voice.voiceId, model: educatorVoiceModel(script) };
+  return voice.provider === "openai" ? null : { provider: voice.provider, voiceId: voice.voiceId, model: educatorVoiceModel(script), speed: EDUCATOR_VOICE_SPEED };
 }
 
 /** ElevenLabs voice types that are NOT a copy of a real person's voice. */
