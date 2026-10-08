@@ -9,7 +9,9 @@ import sharp from "sharp";
  *   cards     "Title = text | Title = text"                   up to 6 cards in a grid
  *   timeline  "1992 = RCI Act | 1995 = PWD Act"               years on a line, events beside them
  *   compare   "Equality = same for all | Equity = as needed"  two columns side by side
- *   table     "Growth = Development | Physical = All-round"   first item is the header row, then one row per item
+ *   table     "Growth = Development | Physical = All-round"   first item is the header row, then one row per item;
+ *             more columns: "Feature = Prokaryotic = Eukaryotic | Nucleus = Absent = Present" (the header's count of
+ *             " = " sets the columns, up to 6; with 2 columns a row is split only at its first "=", as before)
  *   hub       "Child = 5 aspects | Physical = clay, sand"    first item in the centre, the rest around it (mind map)
  *   venn      "Growth = size | Development = behaviour"      2 or 3 overlapping circles; optional last item = the overlap
  *   stairs    "0-2 = Sensorimotor | 2-7 = Preoperational"    steps rising left to right, one per item
@@ -98,7 +100,10 @@ async function wrap(text: string, size: number, maxWidth: number) {
 async function fit(text: string, maxWidth: number, maxHeight: number, start: number, min = 20) {
   for (let size = start; size >= min; size -= 2) {
     const lines = await wrap(text, size, maxWidth);
-    if (lines.length * size * 1.3 <= maxHeight) return { lines, size };
+    if (lines.length * size * 1.3 > maxHeight) continue;
+    // A single long word cannot wrap, so also shrink until every line is inside the box (no spill into the next cell).
+    const widths = await Promise.all(lines.map((line) => textWidth(line, size)));
+    if (widths.every((width) => width <= maxWidth)) return { lines, size };
   }
   return { lines: await wrap(text, min, maxWidth), size: min };
 }
@@ -163,6 +168,52 @@ export function loadPedagogyImage(file: string, folder = join(process.cwd(), PED
 }
 
 /** One SVG fragment per item; element i is drawn from step i + 1. `zoom` marks the centre a new picture grows from. */
+export const TABLE_MAX_COLUMNS = 6;
+const CELL_SPLIT = /\s+=\s+/;
+/** Number of table columns, from the header row: "Feature = A = B" -> 3. Picture suffix ignored. */
+export function tableColumns(header: string) {
+  return Math.min(TABLE_MAX_COLUMNS, Math.max(2, header.replace(ITEM_PICTURE, "").split(CELL_SPLIT).length));
+}
+
+/** Splits a row into exactly `columns` cells; extra "=" stay in the last cell, missing cells are blank. */
+export function tableCells(item: Item, columns: number) {
+  const rest = item.text ? item.text.split(CELL_SPLIT) : [];
+  const cells = [item.title, ...rest.slice(0, columns - 2), rest.slice(columns - 2).join(" = ")];
+  return cells.slice(0, columns).map((cell) => (cell ?? "").trim());
+}
+
+/** A table with 3 to 6 columns: first column for the point being compared, the rest share the width. */
+async function multiColumnTable(parsed: Item[], columns: number, imageFolder?: string) {
+  const elements: { step: number; svg: string }[] = [];
+  const total = BOARD.width - 80;
+  const first = total * (columns === 3 ? 0.3 : columns === 4 ? 0.24 : 0.19);
+  const other = (total - first) / (columns - 1);
+  const widths = [first, ...Array.from({ length: columns - 1 }, () => other)];
+  const x0 = BOARD.x + 40;
+  const rowHeight = Math.min(parsed.some((item) => item.picture) ? 150 : 130, (BOARD.height - 80) / parsed.length);
+  for (const [i, item] of parsed.entries()) {
+    const y = BOARD.y + 40 + i * rowHeight;
+    const header = i === 0;
+    const cells = tableCells(item, columns);
+    const fill = header ? "#2b3f6b" : i % 2 ? "#1d2a47" : "#22304f";
+    let svg = `<rect x="${x0}" y="${y.toFixed(1)}" width="${total}" height="${rowHeight.toFixed(1)}" rx="${header ? 14 : 0}" fill="${fill}"/>`;
+    let x = x0;
+    for (const [c, cell] of cells.entries()) {
+      const width = widths[c];
+      const tw = c === 0 && item.picture ? rowHeight - 12 : 0;
+      if (tw) svg += await framedPicture(item.picture!, { x: x + 10, y: y + 6, w: tw, h: tw }, `tm-${i}`, imageFolder);
+      const block = await fit(cell, width - 28 - (tw ? tw + 12 : 0), rowHeight - 12, header ? 36 : 32, 16);
+      const top = y + rowHeight / 2 - ((block.lines.length - 1) * block.size * 1.3) / 2 + block.size * 0.35;
+      const colour = header ? COLOURS[c % COLOURS.length] : c === 0 ? "#ffd166" : "#eef1f7";
+      if (c > 0) svg += `<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(y + rowHeight).toFixed(1)}" stroke="#33415c" stroke-width="2"/>`;
+      svg += textBlock(block.lines, x + 14 + (tw ? tw + 8 : 0), top, block.size, colour);
+      x += width;
+    }
+    elements.push({ step: i + 1, svg });
+  }
+  return elements;
+}
+
 export async function infographicElements(kind: InfographicKind, items: string[], imageFolder?: string) {
   const parsed = items.map(splitItem);
   const n = parsed.length;
@@ -252,6 +303,11 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       elements.push({ step: i + 1, svg: `<text x="${lineX - 40}" y="${(y + 14).toFixed(1)}" text-anchor="end" font-family="${SERIF}" font-size="40" fill="${colour}">${richText(item.text ? item.title : "", colour).svg}</text><circle cx="${lineX}" cy="${y.toFixed(1)}" r="16" fill="${colour}"/>${textBlock(body.lines, lineX + 44, top, body.size, "#eef1f7")}${pictureSvg}`, zoom: item.picture ? [BOARD.x + BOARD.width / 2, y] : undefined });
     }
   } else if (kind === "table") {
+    const columns = tableColumns(items[0] ?? "");
+    if (columns > 2) {
+      elements.push(...await multiColumnTable(parsed, columns, imageFolder));
+      return elements;
+    }
     const [left, right] = [0.42, 0.58].map((share) => (BOARD.width - 80) * share);
     const x = BOARD.x + 40;
     const rowHeight = Math.min(parsed.some((item) => item.picture) ? 150 : 130, (BOARD.height - 80) / n);
