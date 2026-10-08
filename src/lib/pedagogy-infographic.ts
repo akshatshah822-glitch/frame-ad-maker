@@ -18,6 +18,8 @@ import sharp from "sharp";
  *   image     "potter.png = Clay is shaped when it is ready"  pictures from the pedagogy-images folder, caption optional;
  *             the newest picture fades in and zooms up to full size
  * One item appears per step (diagram_step), in the order written, like a teacher writing on the board.
+ * Highlight: wrap key words of any item in *stars*, e.g. "Prokaryotic = *No* membrane-bound nucleus"; they are drawn
+ * bold in the highlight colour so students see the key point or difference. Stars never show on the slide.
  */
 export const INFOGRAPHIC_KINDS = ["flow", "cards", "timeline", "compare", "image", "table", "hub", "venn", "stairs"] as const;
 export type InfographicKind = (typeof INFOGRAPHIC_KINDS)[number];
@@ -50,12 +52,30 @@ function escapeXml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
 
+/** Highlight colour for *starred* words: yellow, or coral when the text itself is already yellow. */
+export function highlightColour(colour: string) {
+  return colour.toLowerCase() === "#ffd166" ? "#ff9f6b" : "#ffd166";
+}
+
+/**
+ * One line of text as SVG with *starred* parts bold and coloured. `on` says whether a highlight
+ * started on an earlier line is still open, so a highlight can wrap onto the next line.
+ */
+export function richText(line: string, colour: string, on = false) {
+  let svg = "";
+  for (const [index, part] of line.split("*").entries()) {
+    if (index > 0) on = !on;
+    if (part) svg += on ? `<tspan fill="${highlightColour(colour)}" font-weight="bold">${escapeXml(part)}</tspan>` : escapeXml(part);
+  }
+  return { svg, on };
+}
+
 const widthCache = new Map<string, Promise<number>>();
 function textWidth(text: string, size: number) {
   const key = `${size}|${text}`;
   let width = widthCache.get(key);
   if (!width) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(text.length * size * 1.2 + 40)}" height="${Math.ceil(size * 2)}"><text x="10" y="${Math.round(size * 1.4)}" font-family="${SERIF}" font-size="${size}" fill="#000">${escapeXml(text)}</text></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(text.length * size * 1.2 + 40)}" height="${Math.ceil(size * 2)}"><text x="10" y="${Math.round(size * 1.4)}" font-family="${SERIF}" font-size="${size}" fill="#000">${richText(text, "#000").svg}</text></svg>`;
     width = sharp(Buffer.from(svg)).trim().png().toBuffer({ resolveWithObject: true }).then(({ info }) => info.width).catch(() => text.length * size * 0.5);
     widthCache.set(key, width);
   }
@@ -83,8 +103,15 @@ async function fit(text: string, maxWidth: number, maxHeight: number, start: num
   return { lines: await wrap(text, min, maxWidth), size: min };
 }
 
-const textBlock = (lines: string[], x: number, y: number, size: number, colour: string, anchor = "start") =>
-  lines.map((line, index) => `<text x="${x}" y="${(y + index * size * 1.3).toFixed(1)}" text-anchor="${anchor}" font-family="${SERIF}" font-size="${size}" fill="${colour}">${escapeXml(line)}</text>`).join("");
+const textBlock = (lines: string[], x: number, y: number, size: number, colour: string, anchor = "start") => {
+  let on = false;
+  return lines.map((line, index) => {
+    // A line that starts inside an open highlight is measured and drawn as highlighted.
+    const rich = richText(line, colour, on);
+    on = rich.on;
+    return `<text x="${x}" y="${(y + index * size * 1.3).toFixed(1)}" text-anchor="${anchor}" font-family="${SERIF}" font-size="${size}" fill="${colour}">${rich.svg}</text>`;
+  }).join("");
+};
 
 /** A picture fitted inside a box on a small white card; a visible placeholder if the file is missing. */
 async function framedPicture(file: string, box: { x: number; y: number; w: number; h: number }, id: string, folder?: string) {
@@ -222,7 +249,7 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const pictureSvg = item.picture ? await framedPicture(item.picture, { x: BOARD.x + BOARD.width - 30 - pw, y: y - ph / 2, w: pw, h: ph }, `tl-${i}`, imageFolder) : "";
       const body = await fit(item.text || item.title, BOARD.width - 330 - (pw ? pw + 30 : 0), spacing - 20, 40);
       const top = y - ((body.lines.length - 1) * body.size * 1.3) / 2 + body.size * 0.35;
-      elements.push({ step: i + 1, svg: `<text x="${lineX - 40}" y="${(y + 14).toFixed(1)}" text-anchor="end" font-family="${SERIF}" font-size="40" fill="${colour}">${escapeXml(item.text ? item.title : "")}</text><circle cx="${lineX}" cy="${y.toFixed(1)}" r="16" fill="${colour}"/>${textBlock(body.lines, lineX + 44, top, body.size, "#eef1f7")}${pictureSvg}`, zoom: item.picture ? [BOARD.x + BOARD.width / 2, y] : undefined });
+      elements.push({ step: i + 1, svg: `<text x="${lineX - 40}" y="${(y + 14).toFixed(1)}" text-anchor="end" font-family="${SERIF}" font-size="40" fill="${colour}">${richText(item.text ? item.title : "", colour).svg}</text><circle cx="${lineX}" cy="${y.toFixed(1)}" r="16" fill="${colour}"/>${textBlock(body.lines, lineX + 44, top, body.size, "#eef1f7")}${pictureSvg}`, zoom: item.picture ? [BOARD.x + BOARD.width / 2, y] : undefined });
     }
   } else if (kind === "table") {
     const [left, right] = [0.42, 0.58].map((share) => (BOARD.width - 80) * share);
