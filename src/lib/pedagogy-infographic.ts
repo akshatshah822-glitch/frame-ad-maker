@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import sharp from "sharp";
@@ -96,9 +97,29 @@ async function wrap(text: string, size: number, maxWidth: number) {
   return lines;
 }
 
-/** Largest size (down to `min`) at which the text fits the box; returns the wrapped lines. */
-async function fit(text: string, maxWidth: number, maxHeight: number, start: number, min = 20) {
-  for (let size = start; size >= min; size -= 2) {
+/**
+ * Consistent text: sizes come from one short scale, and within a slide every text of the same role
+ * (title, body, header...) uses the same size: the smallest size any box of that role needed.
+ */
+export const TEXT_SCALE = [52, 46, 40, 36, 32, 28, 24, 22, 20, 18, 16];
+type TextRole = "title" | "body" | "header" | "centre" | "caption" | "label";
+/** One ceiling per role for every slide kind, so a card on one slide and a table on the next use the same sizes. */
+export const ROLE_MAX_SIZE: Record<TextRole, number> = { title: 40, header: 36, centre: 36, label: 36, body: 36, caption: 32 };
+type SizeContext = { caps?: Partial<Record<TextRole, number>>; used: Partial<Record<TextRole, number>> };
+const sizeContext = new AsyncLocalStorage<SizeContext>();
+
+/** Largest scale size (down to `min`) at which the text fits the box; returns the wrapped lines. */
+async function fit(text: string, maxWidth: number, maxHeight: number, start: number, min = 20, role: TextRole = "body") {
+  const context = sizeContext.getStore();
+  const cap = Math.min(start, ROLE_MAX_SIZE[role], context?.caps?.[role] ?? Infinity);
+  const sizes = TEXT_SCALE.filter((size) => size <= cap && size >= min);
+  const result = await fitAt(text, maxWidth, maxHeight, sizes.length ? sizes : [min], min);
+  if (context && text.trim()) context.used[role] = Math.min(context.used[role] ?? Infinity, result.size);
+  return result;
+}
+
+async function fitAt(text: string, maxWidth: number, maxHeight: number, sizes: number[], min: number) {
+  for (const size of sizes) {
     const lines = await wrap(text, size, maxWidth);
     if (lines.length * size * 1.3 > maxHeight) continue;
     // A single long word cannot wrap, so also shrink until every line is inside the box (no spill into the next cell).
@@ -182,39 +203,102 @@ export function tableCells(item: Item, columns: number) {
   return cells.slice(0, columns).map((cell) => (cell ?? "").trim());
 }
 
-/** A table with 3 to 6 columns: first column for the point being compared, the rest share the width. */
+/** Word wrap for table cells: like wrap(), but a hyphenated word may also break after its hyphen. */
+async function wrapCell(text: string, size: number, maxWidth: number) {
+  const lines: string[] = [];
+  let current = "";
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const pieces = word.split(/(?<=-)(?=\w)/);
+    for (const [p, piece] of pieces.entries()) {
+      const next = current ? (p === 0 ? `${current} ${piece}` : `${current}${piece}`) : piece;
+      if (current && await textWidth(next, size) > maxWidth) { lines.push(current); current = piece; } else current = next;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/** Wrapped lines of `text` at exactly `size`, or null when a single word is wider than the cell. */
+async function linesAt(text: string, size: number, maxWidth: number) {
+  const lines = await wrapCell(text, size, maxWidth);
+  const widths = await Promise.all(lines.map((line) => textWidth(line, size)));
+  return widths.every((width) => width <= maxWidth) ? lines : null;
+}
+
+/**
+ * A table with 3 to 6 columns: first column for the point being compared, the rest share the width.
+ * Every cell uses ONE text size (header one step bigger); a row with more text grows taller instead of
+ * shrinking its font, so the table never mixes sizes.
+ */
 async function multiColumnTable(parsed: Item[], columns: number, imageFolder?: string) {
-  const elements: { step: number; svg: string }[] = [];
   const total = BOARD.width - 80;
-  const first = total * (columns === 3 ? 0.3 : columns === 4 ? 0.24 : 0.19);
+  const first = total * (columns === 3 ? 0.3 : columns === 4 ? 0.24 : 0.16);
   const other = (total - first) / (columns - 1);
   const widths = [first, ...Array.from({ length: columns - 1 }, () => other)];
   const x0 = BOARD.x + 40;
-  const rowHeight = Math.min(parsed.some((item) => item.picture) ? 150 : 130, (BOARD.height - 80) / parsed.length);
+  const rows = parsed.map((item) => tableCells(item, columns));
+  const pictureRow = (i: number) => (parsed[i].picture ? 110 : 0);
+  let layout: { size: number; headerSize: number; cells: string[][][]; heights: number[] } | null = null;
+  for (const size of TEXT_SCALE.filter((value) => value <= ROLE_MAX_SIZE.body && value >= 16)) {
+    const headerSize = TEXT_SCALE.find((value) => value <= size + 4) ?? size;
+    const cells: string[][][] = [];
+    const heights: number[] = [];
+    let ok = true;
+    for (const [i, row] of rows.entries()) {
+      const s = i === 0 ? headerSize : size;
+      const wrapped: string[][] = [];
+      for (const [c, cell] of row.entries()) {
+        const tw = c === 0 ? pictureRow(i) : 0;
+        const lines = await linesAt(cell, s, widths[c] - 28 - (tw ? tw + 12 : 0));
+        if (!lines) { ok = false; break; }
+        wrapped.push(lines);
+      }
+      if (!ok) break;
+      cells.push(wrapped);
+      heights.push(Math.max(i === 0 ? 76 : 64, pictureRow(i) + 12, Math.max(...wrapped.map((l) => l.length)) * s * 1.3 + 24));
+    }
+    if (ok && heights.reduce((a, b) => a + b, 0) <= BOARD.height - 80) { layout = { size, headerSize, cells, heights }; break; }
+  }
+  if (!layout) {
+    console.warn("Pedagogy table", { path: "smallest-size-overflow", reason: "table text does not fit even at 16px; drawn at 16px" });
+    const cells = await Promise.all(rows.map((row, i) => Promise.all(row.map((cell, c) => wrap(cell, 16, widths[c] - 28 - (c === 0 ? pictureRow(i) : 0))))));
+    layout = { size: 16, headerSize: 16, cells, heights: cells.map(() => (BOARD.height - 80) / cells.length) };
+  }
+  const elements: { step: number; svg: string }[] = [];
+  let y = BOARD.y + 40;
   for (const [i, item] of parsed.entries()) {
-    const y = BOARD.y + 40 + i * rowHeight;
     const header = i === 0;
-    const cells = tableCells(item, columns);
+    const rowHeight = layout.heights[i];
+    const size = header ? layout.headerSize : layout.size;
     const fill = header ? "#2b3f6b" : i % 2 ? "#1d2a47" : "#22304f";
     let svg = `<rect x="${x0}" y="${y.toFixed(1)}" width="${total}" height="${rowHeight.toFixed(1)}" rx="${header ? 14 : 0}" fill="${fill}"/>`;
     let x = x0;
-    for (const [c, cell] of cells.entries()) {
-      const width = widths[c];
-      const tw = c === 0 && item.picture ? rowHeight - 12 : 0;
-      if (tw) svg += await framedPicture(item.picture!, { x: x + 10, y: y + 6, w: tw, h: tw }, `tm-${i}`, imageFolder);
-      const block = await fit(cell, width - 28 - (tw ? tw + 12 : 0), rowHeight - 12, header ? 36 : 32, 16);
-      const top = y + rowHeight / 2 - ((block.lines.length - 1) * block.size * 1.3) / 2 + block.size * 0.35;
+    for (const [c, lines] of layout.cells[i].entries()) {
+      const tw = c === 0 ? pictureRow(i) : 0;
+      if (tw) svg += await framedPicture(item.picture!, { x: x + 10, y: y + (rowHeight - tw) / 2, w: tw, h: tw }, `tm-${i}`, imageFolder);
+      const top = y + rowHeight / 2 - ((lines.length - 1) * size * 1.3) / 2 + size * 0.35;
       const colour = header ? COLOURS[c % COLOURS.length] : c === 0 ? "#ffd166" : "#eef1f7";
       if (c > 0) svg += `<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(y + rowHeight).toFixed(1)}" stroke="#33415c" stroke-width="2"/>`;
-      svg += textBlock(block.lines, x + 14 + (tw ? tw + 8 : 0), top, block.size, colour);
-      x += width;
+      svg += textBlock(lines, x + 14 + (tw ? tw + 8 : 0), top, size, colour);
+      x += widths[c];
     }
     elements.push({ step: i + 1, svg });
+    y += rowHeight;
   }
   return elements;
 }
 
+/**
+ * Draws the slide twice: the first pass finds the smallest size each text role needed, the second
+ * draws every text of that role at that one size, so boxes on the same slide never mix font sizes.
+ */
 export async function infographicElements(kind: InfographicKind, items: string[], imageFolder?: string) {
+  const first: SizeContext = { used: {} };
+  await sizeContext.run(first, () => drawElements(kind, items, imageFolder));
+  return sizeContext.run({ caps: first.used, used: {} }, () => drawElements(kind, items, imageFolder));
+}
+
+async function drawElements(kind: InfographicKind, items: string[], imageFolder?: string) {
   const parsed = items.map(splitItem);
   const n = parsed.length;
   const elements: { step: number; svg: string; zoom?: [number, number] }[] = [];
@@ -230,7 +314,7 @@ export async function infographicElements(kind: InfographicKind, items: string[]
     for (const [i, item] of parsed.entries()) {
       const x = BOARD.x + 40 + (i % columns) * (width + gap);
       const y = BOARD.y + 40 + Math.floor(i / columns) * (height + gap);
-      const caption = item.text ? await fit(item.text, width - 40, 110, 36, 24) : { lines: [], size: 36 };
+      const caption = item.text ? await fit(item.text, width - 40, 110, 36, 24, "caption") : { lines: [], size: 36 };
       const captionHeight = caption.lines.length ? caption.lines.length * caption.size * 1.3 + 20 : 0;
       const picture = pictures[i];
       let body: string;
@@ -264,7 +348,7 @@ export async function infographicElements(kind: InfographicKind, items: string[]
     for (const [i, item] of parsed.entries()) {
       const y = BOARD.y + 40 + i * (boxHeight + gap);
       const label = item.text ? `${item.title}: ${item.text}` : item.title;
-      const { lines, size } = await fit(label, width - 60, boxHeight - 24, 44);
+      const { lines, size } = await fit(label, width - 60, boxHeight - 24, 44, 20, "label");
       const top = y + boxHeight / 2 - ((lines.length - 1) * size * 1.3) / 2 + size * 0.35;
       const colour = COLOURS[i % COLOURS.length];
       const arrow = i > 0 ? arrowDown(BOARD.x + BOARD.width / 2, y - gap + 4, y - 2, "#9fb3d1") : "";
@@ -284,7 +368,7 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const pw = item.picture ? Math.min(width * 0.45, (height - 30) * 1.4) : 0;
       const textWidth = width - 50 - (pw ? pw + 16 : 0);
       const pictureSvg = item.picture ? await framedPicture(item.picture, { x: x + width - pw - 14, y: y + 14, w: pw, h: height - 28 }, `cd-${i}`, imageFolder) : "";
-      const title = await fit(item.title, textWidth, Math.min(120, height * 0.4), 44);
+      const title = await fit(item.title, textWidth, Math.min(120, height * 0.4), 44, 20, "title");
       const titleHeight = title.lines.length * title.size * 1.3;
       const body = item.text ? await fit(item.text, textWidth, height - titleHeight - 50, 40) : { lines: [], size: 40 };
       elements.push({ step: i + 1, svg: `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${width.toFixed(1)}" height="${height.toFixed(1)}" rx="18" fill="#22304f" stroke="${colour}" stroke-width="3"/><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="12" height="${height.toFixed(1)}" rx="6" fill="${colour}"/>${textBlock(title.lines, x + 34, y + 20 + title.size, title.size, colour)}${textBlock(body.lines, x + 34, y + 34 + titleHeight + body.size, body.size, "#eef1f7")}${pictureSvg}`, zoom: item.picture ? [x + width / 2, y + height / 2] : undefined });
@@ -314,11 +398,11 @@ export async function infographicElements(kind: InfographicKind, items: string[]
     for (const [i, item] of parsed.entries()) {
       const y = BOARD.y + 40 + i * rowHeight;
       const header = i === 0;
-      const size = header ? 40 : 34;
+      const size = header ? 40 : 36;
       const tw = item.picture ? rowHeight - 12 : 0;
       const pictureSvg = item.picture ? await framedPicture(item.picture, { x: x + 10, y: y + 6, w: tw, h: tw }, `tb-${i}`, imageFolder) : "";
-      const a = await fit(item.title, left - 40 - (tw ? tw + 12 : 0), rowHeight - 16, size, 22);
-      const b = await fit(item.text, right - 40, rowHeight - 16, size, 22);
+      const a = await fit(item.title, left - 40 - (tw ? tw + 12 : 0), rowHeight - 16, size, 22, header ? "header" : "body");
+      const b = await fit(item.text, right - 40, rowHeight - 16, size, 22, header ? "header" : "body");
       const lineTop = (block: { lines: string[]; size: number }) => y + rowHeight / 2 - ((block.lines.length - 1) * block.size * 1.3) / 2 + block.size * 0.35;
       const fill = header ? "#2b3f6b" : i % 2 ? "#1d2a47" : "#22304f";
       const bColour = header ? "#7fe08a" : "#eef1f7";
@@ -328,7 +412,7 @@ export async function infographicElements(kind: InfographicKind, items: string[]
   } else if (kind === "hub") {
     const cx = BOARD.x + BOARD.width / 2, cy = BOARD.y + BOARD.height / 2;
     const [centre, ...spokes] = parsed;
-    const centreText = await fit(centre.text ? `${centre.title}: ${centre.text}` : centre.title, 250, 150, 40, 24);
+    const centreText = await fit(centre.text ? `${centre.title}: ${centre.text}` : centre.title, 250, 150, 40, 24, "centre");
     const centreTop = cy - ((centreText.lines.length - 1) * centreText.size * 1.3) / 2 + centreText.size * 0.35;
     elements.push({ step: 1, svg: `<circle cx="${cx}" cy="${cy}" r="150" fill="#2b3f6b" stroke="#ffd166" stroke-width="5"/>${textBlock(centreText.lines, cx, centreTop, centreText.size, "#ffd166", "middle")}`, zoom: [cx, cy] });
     const rx = 395, ry = 320, boxW = 360, boxH = 170;
@@ -336,8 +420,8 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const angle = -Math.PI / 2 + (i * 2 * Math.PI) / spokes.length;
       const bx = cx + rx * Math.cos(angle), by = cy + ry * Math.sin(angle);
       const colour = COLOURS[i % COLOURS.length];
-      const title = await fit(item.title, boxW - 30, 54, 40, 24);
-      const body = item.text ? await fit(item.text, boxW - 30, boxH - 34 - title.lines.length * title.size * 1.3, 32, 20) : { lines: [], size: 28 };
+      const title = await fit(item.title, boxW - 30, 54, 40, 24, "title");
+      const body = item.text ? await fit(item.text, boxW - 30, boxH - 34 - title.lines.length * title.size * 1.3, 36, 20) : { lines: [], size: 28 };
       const top = by - boxH / 2;
       const lx = cx + 150 * Math.cos(angle), ly = cy + 150 * Math.sin(angle);
       elements.push({ step: i + 2, svg: `<line x1="${lx.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="${colour}" stroke-width="4" stroke-dasharray="10 8"/><rect x="${(bx - boxW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${boxW}" height="${boxH}" rx="18" fill="#22304f" stroke="${colour}" stroke-width="3"/>${textBlock(title.lines, bx, top + 18 + title.size, title.size, colour, "middle")}${textBlock(body.lines, bx, top + 30 + title.lines.length * title.size * 1.3 + body.size, body.size, "#eef1f7", "middle")}`, zoom: [bx, by] });
@@ -358,12 +442,12 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const colour = COLOURS[i % COLOURS.length];
       const [x, y] = centres[i];
       const [lx, ly] = labelAt(i);
-      const title = await fit(item.title, 230, 60, 40, 24);
+      const title = await fit(item.title, 230, 60, 40, 24, "title");
       const body = item.text ? await fit(item.text, 210, 120, 30, 20) : { lines: [], size: 28 };
       elements.push({ step: i + 1, svg: `<circle cx="${x}" cy="${y}" r="${r}" fill="${colour}" fill-opacity="0.18" stroke="${colour}" stroke-width="4"/>${textBlock(title.lines, lx, ly - 20, title.size, colour, "middle")}${textBlock(body.lines, lx, ly + 22 + body.size * 0.5, body.size, "#eef1f7", "middle")}`, zoom: [x, y] });
     }
     if (overlap) {
-      const label = await fit(overlap.text ? `${overlap.title}: ${overlap.text}` : overlap.title, 150, 130, 30, 18);
+      const label = await fit(overlap.text ? `${overlap.title}: ${overlap.text}` : overlap.title, 150, 130, 30, 18, "centre");
       elements.push({ step: 4, svg: `<circle cx="${cx}" cy="${cy - 10}" r="96" fill="#101a30" stroke="#ffd166" stroke-width="3"/>${textBlock(label.lines, cx, cy - 10 - ((label.lines.length - 1) * label.size * 1.3) / 2 + label.size * 0.35, label.size, "#ffd166", "middle")}`, zoom: [cx, cy] });
     }
   } else if (kind === "stairs") {
@@ -376,7 +460,7 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const x = BOARD.x + 40 + i * (stepW + gap);
       const blockTop = BOARD.y + BOARD.height - 60 - base - i * rise;
       const colour = COLOURS[i % COLOURS.length];
-      const title = await fit(item.title, stepW - 24, 90, 34, 20);
+      const title = await fit(item.title, stepW - 24, 90, 34, 20, "title");
       const pictureH = item.picture ? Math.min(150, stepW * 0.8) : 0;
       const pictureSvg = item.picture ? await framedPicture(item.picture, { x: x + 10, y: blockTop + 22, w: stepW - 20, h: pictureH }, `st-${i}`, imageFolder) : "";
       const body = item.text ? await fit(item.text, stepW - 24, base + i * rise - 50 - pictureH, 34, 18) : { lines: [], size: 28 };
@@ -392,7 +476,7 @@ export async function infographicElements(kind: InfographicKind, items: string[]
       const y = BOARD.y + 40;
       const height = BOARD.height - 80;
       const colour = i === 0 ? "#4fa3ff" : "#7fe08a";
-      const title = await fit(item.title, width - 60, 140, 52);
+      const title = await fit(item.title, width - 60, 140, 52, 20, "title");
       const titleHeight = title.lines.length * title.size * 1.3;
       const pictureH = item.picture ? 300 : 0;
       const pictureSvg = item.picture ? await framedPicture(item.picture, { x: x + 30, y: y + 70 + titleHeight, w: width - 60, h: pictureH }, `cp-${i}`, imageFolder) : "";
