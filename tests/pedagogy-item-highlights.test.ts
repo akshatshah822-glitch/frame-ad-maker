@@ -19,7 +19,7 @@ test("yellow text gets a different highlight colour so the highlight is still vi
 });
 
 test("a highlight that wraps onto the next line stays highlighted on both lines", async () => {
-  const [card] = await infographicElements("cards", ["RNA = *the first genetic material, reactive and catalytic, mutates faster than DNA*"]);
+  const [card] = await infographicElements("cards", ["RNA = *the first genetic material, reactive and catalytic, mutates faster than DNA, single stranded with uracil instead of thymine and ribose sugar with an extra OH group*"]);
   assert.doesNotMatch(card.svg, /\*/);
   assert.ok((card.svg.match(/font-weight="bold"/g) ?? []).length >= 2, "both wrapped lines are highlighted");
 });
