@@ -74,3 +74,25 @@ test("educator narration is slowed to 0.9 and the speed is part of the audio cac
   const voice = { provider: "elevenlabs" as const, label: "educator" as const, voiceId: "v", consentRef: "c" };
   assert.equal(pedagogyVoiceCacheIdentity(voice, "छह")?.speed, 0.9, "old faster audio is not reused from the cache");
 });
+
+test("a refused educator line keeps ElevenLabs' reason in the error, without the key", async () => {
+  const { createPedagogyNarrationTracks } = await import("../src/lib/pedagogy-narration-duration");
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "voice-err-"));
+  const row = { sourceRow: 4, narration: "छह" } as never;
+  const errors: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { errors.push(JSON.stringify(args)); };
+  try {
+    await assert.rejects(
+      createPedagogyNarrationTracks([row], dir, undefined, { useCache: false, generate: async () => { throw new Error("Educator voice request failed with HTTP 401 (quota_exceeded)."); } }),
+      /Row 4: FRAME could not complete narration speech generation\. Reason: Educator voice request failed with HTTP 401 \(quota_exceeded\)/,
+    );
+  } finally {
+    console.error = original;
+  }
+  assert.match(errors.join(""), /speech-generation-failed/);
+  assert.doesNotMatch(errors.join(""), /test-only-not-a-key/);
+});

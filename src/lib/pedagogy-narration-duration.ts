@@ -13,8 +13,8 @@ export class PedagogyNarrationMeasurementError extends Error {
   readonly sourceRow: number;
   readonly safeReason: string;
 
-  constructor(sourceRow: number, stage: "speech-generation" | "audio-write" | "duration-probe") {
-    super(`Row ${sourceRow}: FRAME could not complete narration ${stage.replace("-", " ")}.`);
+  constructor(sourceRow: number, stage: "speech-generation" | "audio-write" | "duration-probe", reason?: string) {
+    super(`Row ${sourceRow}: FRAME could not complete narration ${stage.replace("-", " ")}.${reason ? ` Reason: ${reason}` : ""}`);
     this.name = "PedagogyNarrationMeasurementError";
     this.sourceRow = sourceRow;
     this.safeReason = `Narration ${stage} failed.`;
@@ -83,7 +83,10 @@ export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directo
       if (!fromCache && useCache) await storeCachedNarration(row.narration, audio, cacheDirectory);
     } catch (error) {
       if (error instanceof PedagogyNarrationMeasurementError) throw error;
-      throw new PedagogyNarrationMeasurementError(row.sourceRow, "speech-generation");
+      // Keep the provider's reason visible (HTTP status and error code only, never the key).
+      const reason = error instanceof Error ? error.message.slice(0, 200) : "unknown";
+      console.error(`Pedagogy narration failed on row ${row.sourceRow}: ${reason}`, { path: "speech-generation-failed", sourceRow: row.sourceRow, voice: voice.label, reason });
+      throw new PedagogyNarrationMeasurementError(row.sourceRow, "speech-generation", reason);
     }
     if (fromCache) usage.cacheHits += 1;
     else {
