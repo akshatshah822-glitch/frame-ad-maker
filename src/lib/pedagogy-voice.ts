@@ -1,12 +1,13 @@
 import { generateNarrationTrack } from "@/lib/voice";
 
 // Exam-question (pedagogy) narration voice only. The ad/film path keeps using generateNarrationTrack directly.
-// When ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID are both set, every pedagogy line is spoken in that
-// cloned voice. Otherwise FRAME's existing OpenAI "cedar" voice is used. The provider in use is logged.
-// If the cloned voice is configured but a request fails, the line fails loudly rather than switching
+// When ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID are both set, every exam narration line is spoken in
+// that ElevenLabs voice (FRAME uses the existing Indian narrator voice MPaTa7NVsOK1Jo2FOqXo).
+// Otherwise FRAME's existing OpenAI "cedar" voice is used. The provider in use is logged.
+// If ElevenLabs is configured but a request fails, the line fails loudly rather than switching
 // voices mid-video.
 
-export type PedagogyVoiceProvider = "elevenlabs-cloned" | "openai-cedar";
+export type PedagogyVoiceProvider = "elevenlabs" | "openai-cedar";
 
 type VoiceEnvironment = Partial<Record<"ELEVENLABS_API_KEY" | "ELEVENLABS_VOICE_ID" | "ELEVENLABS_MODEL_ID", string | undefined>> & Record<string, string | undefined>;
 type VoiceDependencies = {
@@ -15,17 +16,17 @@ type VoiceDependencies = {
   openaiTrack?: (narration: string) => Promise<Uint8Array>;
 };
 
-export class PedagogyClonedVoiceError extends Error {
+export class PedagogyElevenLabsVoiceError extends Error {
   readonly status: number | null;
   constructor(status: number | null) {
-    super(`The cloned narration voice request failed${status === null ? "" : ` with HTTP ${status}`}.`);
-    this.name = "PedagogyClonedVoiceError";
+    super(`The ElevenLabs narration voice request failed${status === null ? "" : ` with HTTP ${status}`}.`);
+    this.name = "PedagogyElevenLabsVoiceError";
     this.status = status;
   }
 }
 
 export function pedagogyVoiceProvider(env: VoiceEnvironment = process.env): PedagogyVoiceProvider {
-  return env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim() ? "elevenlabs-cloned" : "openai-cedar";
+  return env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim() ? "elevenlabs" : "openai-cedar";
 }
 
 export async function generatePedagogyNarrationTrack(narration: string, dependencies: VoiceDependencies = {}) {
@@ -46,14 +47,14 @@ export async function generatePedagogyNarrationTrack(narration: string, dependen
       }),
     });
   } catch {
-    console.error("Pedagogy cloned voice request failed", { provider: "elevenlabs-cloned", status: null });
-    throw new PedagogyClonedVoiceError(null);
+    console.error("Pedagogy ElevenLabs voice request failed", { provider: "elevenlabs", status: null });
+    throw new PedagogyElevenLabsVoiceError(null);
   }
   if (!response.ok) {
-    console.error("Pedagogy cloned voice request failed", { provider: "elevenlabs-cloned", status: response.status });
-    throw new PedagogyClonedVoiceError(response.status);
+    console.error("Pedagogy ElevenLabs voice request failed", { provider: "elevenlabs", status: response.status });
+    throw new PedagogyElevenLabsVoiceError(response.status);
   }
   const audio = new Uint8Array(await response.arrayBuffer());
-  if (!audio.byteLength) throw new PedagogyClonedVoiceError(response.status);
+  if (!audio.byteLength) throw new PedagogyElevenLabsVoiceError(response.status);
   return audio;
 }
