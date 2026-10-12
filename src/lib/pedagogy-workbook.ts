@@ -20,5 +20,8 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     board: row.board,
     emphasis: row.emphasis,
     pauseAfter: row.pause_after,
+    visual: row.visual,
+    visualData: row.visual_data,
+    background: row.background,
   } satisfies PedagogyBriefInputRow));
 }

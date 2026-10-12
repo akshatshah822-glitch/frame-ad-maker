@@ -1,16 +1,18 @@
 import sharp from "sharp";
+import { pedagogyFrameClose, pedagogyFrameOpen } from "@/lib/pedagogy-slide-theme";
 
 export type PedagogySlideState = {
   questionId: string;
   board: string;
   emphasis: string;
   generatedTimeLabel: string;
+  backgroundImage?: string | null;
 };
 
-type BoardSegment = { text: string; emphasized: boolean };
-type BoardLine = BoardSegment[];
+export type BoardSegment = { text: string; emphasized: boolean };
+export type BoardLine = BoardSegment[];
 
-function escapeXml(value: string) {
+export function escapeXml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
 
@@ -31,7 +33,7 @@ function boardTokens(board: string, emphasis: string): BoardSegment[] {
   return tokens;
 }
 
-function boardLines(board: string, emphasis: string, maximumCharacters: number): BoardLine[] {
+export function boardLines(board: string, emphasis: string, maximumCharacters: number): BoardLine[] {
   const lines: BoardLine[] = [[]];
   let characters = 0;
   for (const token of boardTokens(board, emphasis)) {
@@ -60,24 +62,16 @@ function fitBoard(board: string, emphasis: string) {
 
 function textLine(line: BoardLine, x: number, y: number, size: number) {
   const spans = line.map((segment) => `<tspan${segment.emphasized ? ' fill="#ff5c46" text-decoration="underline" text-decoration-thickness="3"' : ""}>${escapeXml(segment.text)}</tspan>`).join("");
-  return `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="${size}" font-weight="700" fill="#f5f7f8">${spans}</text>`;
+  return `<text xml:space="preserve" x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="${size}" font-weight="700" fill="#f5f7f8">${spans}</text>`;
 }
 
 export async function createPedagogySlide(state: PedagogySlideState) {
-  const width = 1920;
-  const height = 1080;
   const layout = fitBoard(state.board, state.emphasis);
   const firstLineY = 290 + Math.max(0, (650 - layout.lines.length * layout.lineHeight) / 2) + layout.lineHeight;
   const boardText = layout.lines.map((line, index) => textLine(line, 230, firstLineY + index * layout.lineHeight, layout.size)).join("");
-  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1920" height="1080" fill="#101b36"/>
-    <rect x="0" y="0" width="1920" height="20" fill="#ff5c46"/>
-    <rect x="120" y="160" width="1680" height="760" rx="28" fill="#17233e" stroke="#52617f" stroke-width="3"/>
-    <text x="180" y="106" font-family="Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="5" fill="#bfc9dc">EXAM EXPLAINER</text>
-    <text x="1740" y="106" text-anchor="end" font-family="Arial, sans-serif" font-size="25" font-weight="800" letter-spacing="3" fill="#ff5c46">${escapeXml(state.generatedTimeLabel)}</text>
-    <text x="230" y="228" font-family="Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="3" fill="#9eabc3">${escapeXml(state.questionId || "BOARD")}</text>
+  const svg = `${pedagogyFrameOpen(state)}
+    <text x="230" y="228" font-family="Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="3" fill="#a9b5cf">${escapeXml(state.questionId || "BOARD")}</text>
     ${boardText}
-    <text x="150" y="1015" font-family="Arial, sans-serif" font-size="23" font-weight="800" letter-spacing="4" fill="#9eabc3">FRAME / PEDAGOGY BRIEF</text>
-  </svg>`;
+  ${pedagogyFrameClose}`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
