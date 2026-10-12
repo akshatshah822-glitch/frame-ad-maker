@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { generateNarrationTrack } from "@/lib/voice";
+import { generatePedagogyNarrationTrack, pedagogyVoiceProvider } from "@/lib/pedagogy-voice";
 import { probeFinalVideo } from "@/lib/video-qa";
 import { createQuestionSlide, type QuestionSlideState } from "@/lib/question-slide";
 import type { StoredQuestionGeneration } from "@/lib/question-generation-data";
@@ -28,7 +28,8 @@ export async function renderQuestionVideo(generation: StoredQuestionGeneration) 
   const directory = await mkdtemp(join(tmpdir(), "frame-question-"));
   const narrationPath = join(directory, "narration.mp3");
   const outputPath = join(directory, "question.mp4");
-  await writeFile(narrationPath, await generateNarrationTrack(generation.script));
+  console.info("Question narration voice", { provider: pedagogyVoiceProvider() });
+  await writeFile(narrationPath, await generatePedagogyNarrationTrack(generation.script));
   const narrationDuration = await probeDuration(narrationPath);
   const totalDuration = Math.max(60, Math.ceil(10 + narrationDuration + 2));
   if (totalDuration > 90) throw new Error(`Invalid script: narration makes the question video ${totalDuration} seconds; maximum is 90 seconds.`);
