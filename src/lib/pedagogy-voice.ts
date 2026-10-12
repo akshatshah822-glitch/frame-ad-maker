@@ -142,6 +142,18 @@ export async function assertEducatorVoiceAllowed(voice: PedagogyVoice, fetchImpl
   if (!decision.allowed) throw new PedagogyBriefValidationError(`Educator voice blocked: ${decision.reason}.`, { safeReason: decision.reason });
 }
 
+/** ElevenLabs' own error code (e.g. quota_exceeded, too_many_concurrent_requests), never the key. */
+async function elevenLabsErrorCode(response: Response) {
+  try {
+    const body = (await response.json()) as { detail?: { status?: unknown; code?: unknown } | string };
+    const detail = body.detail;
+    const code = typeof detail === "object" && detail ? detail.status ?? detail.code : undefined;
+    return typeof code === "string" && /^[\w.-]{1,60}$/.test(code) ? ` (${code})` : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function generatePedagogyNarrationTrack(script: string, voice: PedagogyVoice = resolvePedagogyVoice()) {
   if (voice.provider === "elevenlabs") {
     const request = buildEducatorSpeechRequest(script, voice.voiceId);
@@ -151,7 +163,7 @@ export async function generatePedagogyNarrationTrack(script: string, voice: Peda
       body: JSON.stringify(request.body),
     });
     // No silent switch to another voice mid-video: a failed educator line fails the render.
-    if (!response.ok) throw new Error(`Educator voice request failed with HTTP ${response.status}.`);
+    if (!response.ok) throw new Error(`Educator voice request failed with HTTP ${response.status}${await elevenLabsErrorCode(response)}.`);
     return new Uint8Array(await response.arrayBuffer());
   }
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
