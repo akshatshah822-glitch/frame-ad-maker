@@ -1,3 +1,5 @@
+import { parsePedagogyVisual, pedagogyVisualLabels, PedagogyVisualParseError, type PedagogyVisualKind } from "@/lib/pedagogy-visual";
+
 export const pedagogyRequiredColumns = ["question_id", "line_no", "time", "sir_ka_vaakya", "board"] as const;
 
 export type PedagogyBriefInputRow = {
@@ -9,6 +11,9 @@ export type PedagogyBriefInputRow = {
   board: unknown;
   emphasis?: unknown;
   pauseAfter?: unknown;
+  visual?: unknown;
+  visualData?: unknown;
+  background?: unknown;
 };
 
 export type PedagogyRow = {
@@ -24,6 +29,12 @@ export type PedagogyRow = {
   effectiveBoard: string;
   emphasis: string;
   pauseAfter: "haan" | "nahi";
+  /** Optional visual board. Sheets without a `visual` column default to "text", which renders exactly as before. */
+  visual: PedagogyVisualKind;
+  visualData: string;
+  /** Optional background image name; like `board`, a blank cell keeps the previous one and "none" clears it. */
+  background: string;
+  effectiveBackground: string;
 };
 
 export type PedagogyTimingAuditRow = {
@@ -107,6 +118,23 @@ function parsePause(value: unknown, sourceRow: number): "haan" | "nahi" {
   throw rowError(sourceRow, 'pause_after must be "haan", "nahi", or blank.');
 }
 
+function parseBackground(value: unknown, sourceRow: number) {
+  const name = valueAsText(value).trim().toLowerCase();
+  if (name && !/^[a-z0-9][a-z0-9-]*$/.test(name)) throw rowError(sourceRow, `background ${JSON.stringify(name)} may only use lowercase letters, numbers and hyphens.`);
+  return name;
+}
+
+function parseVisual(kind: unknown, data: unknown, board: unknown, sourceRow: number) {
+  try {
+    const visual = parsePedagogyVisual(kind, data);
+    if (visual.kind !== "text" && valueAsText(board).trim().length > 110) throw rowError(sourceRow, "board is the title above a visual and must be 110 characters or fewer.");
+    return { visual: visual.kind, visualData: visual.kind === "text" ? "" : valueAsText(data).trim() };
+  } catch (error) {
+    if (error instanceof PedagogyVisualParseError) throw rowError(sourceRow, error.message);
+    throw error;
+  }
+}
+
 export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   if (!Array.isArray(inputRows) || inputRows.length === 0) throw new PedagogyBriefValidationError("The first worksheet has no data rows.");
   const rows = inputRows.map((input) => {
@@ -125,12 +153,15 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       board: valueAsText(input.board),
       emphasis: valueAsText(input.emphasis),
       pauseAfter: parsePause(input.pauseAfter, sourceRow),
+      ...parseVisual(input.visual, input.visualData, input.board, sourceRow),
+      background: parseBackground(input.background, sourceRow),
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
   let previousLineNo: number | undefined;
   let previousTime: number | undefined;
   let retainedBoard = "";
+  let retainedBackground = "";
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -138,15 +169,21 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     previousLineNo = row.lineNo;
     previousTime = row.sourceSeconds;
     if (row.board.trim()) retainedBoard = row.board;
+    if (row.background) retainedBackground = row.background === "none" ? "" : row.background;
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    return { ...row, effectiveBoard: retainedBoard, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    return { ...row, effectiveBoard: retainedBoard, effectiveBackground: retainedBackground, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 
 export function pedagogyWarnings(rows: PedagogyRow[]) {
-  return rows.flatMap((row) => row.emphasis.trim() && !row.effectiveBoard.includes(row.emphasis)
-    ? [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not exist on the current board; no highlight was added.`]
-    : []);
+  return rows.flatMap((row) => {
+    if (!row.emphasis.trim()) return [];
+    const visual = row.visual && row.visual !== "text" ? parsePedagogyVisual(row.visual, row.visualData) : null;
+    const found = visual
+      ? row.board.includes(row.emphasis) || pedagogyVisualLabels(visual).some((label) => label.trim() === row.emphasis.trim())
+      : row.effectiveBoard.includes(row.emphasis);
+    return found ? [] : [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not exist on the current board; no highlight was added.`];
+  });
 }
 
 export function buildAdjustedPedagogyTimeline(rows: PedagogyRow[], narrationDurations: number[]): AdjustedPedagogyTimeline {
