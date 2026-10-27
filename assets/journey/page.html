@@ -1,0 +1,93 @@
+<!doctype html>
+<!-- Earth journey page (gs_theme = journey). Loaded by src/lib/pedagogy-journey.ts in a hidden browser; every URL here is
+     served from this repo (three.js from node_modules, fonts from assets/fonts, the texture from assets/journey). -->
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:Itim;src:url(fonts/itim-latin-400-normal.woff)}
+@font-face{font-family:KalamH;font-weight:400;src:url(fonts/kalam-latin-400-normal.woff2);unicode-range:U+0000-00FF,U+2190-21FF,U+2013-201F}
+@font-face{font-family:KalamH;font-weight:700;src:url(fonts/kalam-latin-700-normal.woff2);unicode-range:U+0000-00FF,U+2190-21FF,U+2013-201F}
+@font-face{font-family:KalamH;font-weight:400;src:url(fonts/kalam-latin-ext-400-normal.woff2);unicode-range:U+0100-024F}
+@font-face{font-family:KalamH;font-weight:400;src:url(fonts/kalam-devanagari-400-normal.woff2);unicode-range:U+0900-097F,U+200C-200D}
+@font-face{font-family:KalamH;font-weight:700;src:url(fonts/kalam-devanagari-700-normal.woff2);unicode-range:U+0900-097F,U+200C-200D}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:#03060d}
+canvas,svg{position:absolute;inset:0}
+.lab{position:absolute;font:400 34px Itim,KalamH;white-space:nowrap;text-shadow:0 2px 12px #000,0 0 3px #000}
+</style></head><body>
+<div id="root"></div><div id="labels"></div><svg id="fg" width="1920" height="1080"></svg>
+<script type="importmap">{"imports":{"three":"./three.module.js"}}</script>
+<script type="module">
+import * as THREE from "three";
+const W = 1920, H = 1080, R0 = 4;
+const C = { yellow: "#ffd166", red: "#ff6b6b", blue: "#5fb3ff", orange: "#ffb070", grey: "#8a96ad", green: "#7bd389", white: "#e8eef9" };
+const GLOW = { red: "rgba(255,80,80,1)", blue: "rgba(70,160,255,1)", orange: "rgba(255,160,70,1)", yellow: "rgba(255,209,102,1)", grey: "rgba(140,150,170,1)", green: "rgba(123,211,137,1)", white: "rgba(230,238,249,1)" };
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H); renderer.setPixelRatio(1); renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.getElementById("root").appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x03060d);
+const camera = new THREE.PerspectiveCamera(32, W / H, 0.05, 400);
+{ const g = new THREE.BufferGeometry(), n = 2500, p = new Float32Array(n * 3); let s = 7; const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647); for (let i = 0; i < n; i++) { const v = new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).normalize().multiplyScalar(150); p.set([v.x, v.y, v.z], i * 3); } g.setAttribute("position", new THREE.BufferAttribute(p, 3)); scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x9fb4d8, size: 0.35 }))); }
+scene.add(new THREE.AmbientLight(0x6a85b0, 0.55));
+const sun = new THREE.DirectionalLight(0xffffff, 2.4); scene.add(sun);
+const ll = (lat, lon, r = R0) => { const phi = THREE.MathUtils.degToRad(90 - lat), th = THREE.MathUtils.degToRad(lon + 180); return new THREE.Vector3(-r * Math.sin(phi) * Math.cos(th), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(th)); };
+const tex = await new Promise((res) => new THREE.TextureLoader().load("earth-board.png", (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; res(t); }));
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(R0, 160, 120), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 })));
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(R0 * 1.035, 96, 64), new THREE.ShaderMaterial({ transparent: true, side: THREE.BackSide, depthWrite: false,
+  vertexShader: "varying vec3 n; void main(){ n = normalize(normalMatrix*normal); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0);}",
+  fragmentShader: "varying vec3 n; void main(){ float i = pow(0.75 - dot(n, vec3(0,0,1.0)), 3.0); gl_FragColor = vec4(0.35,0.65,1.0,1.0)*i; }" })));
+const fx = new THREE.Group(); scene.add(fx);
+const glowTex = {}; const glowMap = (c) => glowTex[c] ||= (() => { const cv = document.createElement("canvas"); cv.width = cv.height = 256; const g = cv.getContext("2d"); const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128); gr.addColorStop(0, GLOW[c]); gr.addColorStop(0.5, GLOW[c].replace(",1)", ",0.45)")); gr.addColorStop(1, "rgba(0,0,0,0)"); g.fillStyle = gr; g.fillRect(0, 0, 256, 256); return new THREE.CanvasTexture(cv); })();
+const onSurface = (m, lat, lon, h = 1.004) => { const p = ll(lat, lon, R0 * h); m.position.copy(p); m.lookAt(p.clone().multiplyScalar(2)); fx.add(m); return m; };
+const curve = (a, b, lift) => { const pa = ll(a[0], a[1], R0 * 1.02), pb = ll(b[0], b[1], R0 * 1.02); return new THREE.QuadraticBezierCurve3(pa, pa.clone().add(pb).multiplyScalar(0.5).normalize().multiplyScalar(R0 * lift), pb); };
+function addEffect(e, k) {
+  if (k <= 0) return;
+  if (e.kind === "glow") { const m = onSurface(new THREE.Mesh(new THREE.PlaneGeometry(e.width, e.height), new THREE.MeshBasicMaterial({ map: glowMap(e.colour), transparent: true, opacity: k, depthWrite: false, blending: THREE.AdditiveBlending })), e.lat, e.lon); m.rotateZ(0.35); }
+  if (e.kind === "arc" || e.kind === "path") { const c = curve(e.from, e.to, e.kind === "arc" ? 1.18 : 1.45); const pts = c.getPoints(80).slice(0, Math.max(2, Math.round(81 * k))); const cc = new THREE.CatmullRomCurve3(pts);
+    fx.add(new THREE.Mesh(new THREE.TubeGeometry(cc, 80, e.kind === "arc" ? 0.03 : 0.022, 8), new THREE.MeshBasicMaterial({ color: C[e.colour] })));
+    if (e.kind === "arc" && k >= 1) [[c.getPoint(1), c.getTangent(1)], [c.getPoint(0), c.getTangent(0).negate()]].forEach(([p, t]) => { const cone = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 16), new THREE.MeshBasicMaterial({ color: C[e.colour] })); cone.position.copy(p); cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), t); fx.add(cone); });
+    if (e.kind === "path") for (let i = 0; i < 26 * k; i++) { const d = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff })); d.position.copy(c.getPoint(i / 26)); fx.add(d); } }
+  if (e.kind === "band") { const band = new THREE.Mesh(new THREE.SphereGeometry(R0 * 1.002, 128, 64, 0, Math.PI * 2, THREE.MathUtils.degToRad(90 - e.to), THREE.MathUtils.degToRad(e.to - e.from)), new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.08 * k, depthWrite: false })); fx.add(band);
+    for (const lat of [e.from, e.to]) { const pts = []; for (let i = 0; i <= 256; i++) pts.push(ll(lat, -180 + (i / 256) * 360, R0 * 1.003)); fx.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xffd166, transparent: true, opacity: k }))); } }
+  if (e.kind === "equator") { const pts = []; for (let i = 0; i <= 256; i++) pts.push(ll(0, -180 + (i / 256) * 360, R0 * 1.003)); const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: 0x8a96ad, dashSize: 0.08, gapSize: 0.06, transparent: true, opacity: k })); l.computeLineDistances(); fx.add(l); }
+  if (e.kind === "sink") { const offsets = [[2.2, -4.5], [1, -1.5], [0, 1.5], [-1.2, 4.3], [1.4, -3], [-0.6, 3]]; offsets.forEach(([dla, dlo], i) => { const n = ll(e.lat + dla, e.lon + dlo).normalize(), top = n.clone().multiplyScalar(R0 * (1.16 + (i % 2) * 0.03)), bot = n.clone().multiplyScalar(R0 * (1.025 + (1 - k) * 0.12));
+      const m = new THREE.MeshStandardMaterial({ color: 0x5fb3ff, emissive: 0x2b8cff, emissiveIntensity: 0.6 }); const len = top.distanceTo(bot); if (len < 0.02) return;
+      const sh = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, len, 8), m); sh.position.copy(top.clone().add(bot).multiplyScalar(0.5)); sh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n); fx.add(sh);
+      const hd = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.1, 12), m); hd.position.copy(bot); hd.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), n); fx.add(hd); }); }
+  if (e.kind === "ring") { onSurface(new THREE.Mesh(new THREE.TorusGeometry(0.34 * Math.max(0.2, k), 0.012, 8, 64), new THREE.MeshBasicMaterial({ color: 0xffd166 })), e.lat, e.lon, 1.01); }
+}
+const esc = (t) => String(t).replaceAll("&", "&amp;").replaceAll("<", "&lt;");
+window.renderJourney = (st) => {
+  while (fx.children.length) { const c = fx.children.pop(); c.geometry?.dispose?.(); }
+  st.effects.forEach((e) => addEffect(e.effect, e.k));
+  const { lat, lon, distance, tilt } = st.camera;
+  const n = ll(lat, lon).normalize(), south = ll(Math.max(-89, lat - 30), lon).normalize().sub(n).normalize();
+  camera.position.copy(n.clone().multiplyScalar(R0 + distance).add(south.multiplyScalar(distance * tilt)));
+  camera.up.copy(ll(Math.min(89, lat + 10), lon).normalize());
+  const whole = Math.max(0, Math.min(1, (distance - 9) / 4));
+  camera.lookAt(ll(lat, lon, R0 * (1 - whole)));
+  sun.position.copy(camera.position.clone().add(new THREE.Vector3(-6, 8, 2)));
+  renderer.render(scene, camera);
+  // labels pinned to the globe (hidden when the point is behind the Earth)
+  let fg = "", labels = "";
+  const camDir = camera.position.clone().normalize();
+  st.pins.forEach((pin, i) => { if (pin.k <= 0) return; const p3 = ll(pin.lat, pin.lon, R0 * 1.01); if (p3.clone().normalize().dot(camDir) < 0.12) return; const p = p3.clone().project(camera); const x = (p.x + 1) / 2 * W, y = (1 - p.y) / 2 * H;
+    if (x < 40 || x > W - 40 || y < 120 || y > H - 150) return; const right = x < W * 0.62, dx = right ? 120 : -120, dy = [-110, 60, -30, 140, -170, 110][i % 6];
+    fg += `<g opacity="${pin.k}"><line x1="${x}" y1="${y}" x2="${x + dx}" y2="${y + dy}" stroke="${C[pin.colour]}" stroke-width="2"/><circle cx="${x}" cy="${y}" r="5" fill="${C[pin.colour]}"/></g>`;
+    labels += `<div class="lab" style="opacity:${pin.k};left:${x + dx + (right ? 8 : -8)}px;top:${y + dy - 22}px;color:${C[pin.colour]};${right ? "" : "transform:translateX(-100%)"}">${esc(pin.text)}</div>`; });
+  if (st.cardLines.length) {
+    const words = st.cardLines.map((l) => l.replace(/^(board|cards):\s*/i, "")).join(" · ").split(/\s+/), lines = [""];
+    for (const w of words) { if ((lines[lines.length - 1] + " " + w).trim().length > 34) lines.push(w); else lines[lines.length - 1] = (lines[lines.length - 1] + " " + w).trim(); }
+    const h = 50 + lines.length * 52, top = 900 - h;
+    fg += `<g opacity="${st.cardK}" transform="rotate(-1.2 480 ${top + h / 2})"><rect x="96" y="${top}" width="800" height="${h}" rx="10" fill="#fdfaf0"/>` + lines.map((_, i) => `<line x1="96" y1="${top + 62 + i * 52}" x2="896" y2="${top + 62 + i * 52}" stroke="#c9dcef" stroke-width="2"/>`).join("")
+      + `<line x1="142" y1="${top}" x2="142" y2="${top + h}" stroke="#e57373" stroke-width="2.5"/>` + lines.map((l, i) => `<text x="160" y="${top + 54 + i * 52}" font-family="KalamH" font-size="32" fill="#1f2a44">${esc(l)}</text>`).join("") + `</g>`; }
+  fg += `<rect x="96" y="44" width="300" height="48" rx="24" fill="#1d3557" opacity="0.9"/><text x="246" y="77" text-anchor="middle" font-family="Arial" font-size="22" letter-spacing="2" fill="#8cc4ff">GS · GEOGRAPHY</text>`;
+  if (st.badge) fg += `<rect x="410" y="44" width="${st.badge.length * 14 + 50}" height="48" rx="24" fill="none" stroke="#ffd166" stroke-width="2"/><text x="${410 + (st.badge.length * 14 + 50) / 2}" y="76" text-anchor="middle" font-family="Arial" font-weight="700" font-size="21" fill="#ffd166">${esc(st.badge)}</text>`;
+  const cw = 108, cx0 = 1824 - st.chapters.length * cw + 10;
+  st.chapters.forEach((c, i) => { const x = cx0 + i * cw; fg += `<rect x="${x}" y="52" width="98" height="10" rx="5" fill="${i < st.chapterIndex ? "#ffd166" : i === st.chapterIndex ? "#ffe9a8" : "#263552"}"/><text x="${x + 49}" y="88" text-anchor="middle" font-family="Arial" font-size="17" fill="${i === st.chapterIndex ? "#ffd166" : "#56627a"}">${esc(c)}</text>`; });
+  if (st.caption) { const size = st.caption.length > 70 ? 28 : 33; fg += `<g opacity="${st.captionK}"><rect x="160" y="955" width="1600" height="78" rx="39" fill="#02050b" opacity="0.85"/><text x="900" y="1005" text-anchor="middle" font-family="KalamH" font-size="${size}" fill="#e8eef9">“${esc(st.caption)}”</text>${st.ts ? `<rect x="1640" y="973" width="96" height="42" rx="21" fill="#263552"/><text x="1688" y="1002" text-anchor="middle" font-family="Arial" font-size="20" fill="#cfd8e6">${esc(st.ts)}</text>` : ""}</g>`; }
+  fg += `<text x="1824" y="1066" text-anchor="end" font-family="Arial" font-size="16" letter-spacing="3" fill="#56627a">FRAME</text>`;
+  document.getElementById("fg").innerHTML = fg; document.getElementById("labels").innerHTML = labels;
+  return true;
+};
+await document.fonts.load("34px Itim", "Ab"); for (const w of [400, 700]) { await document.fonts.load(`${w} 34px KalamH`, "Ab"); await document.fonts.load(`${w} 34px KalamH`, "हवा"); } await document.fonts.ready;
+window.__ready = true;
+</script></body></html>

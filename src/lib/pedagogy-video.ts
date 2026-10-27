@@ -15,6 +15,7 @@ import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } fro
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
 import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps } from "@/lib/pedagogy-solution";
+import { openJourneyRenderer, planJourneyRow } from "@/lib/pedagogy-journey";
 import { createBoardSlide, createBoardTrickCard, type BoardSlideState } from "@/lib/pedagogy-board-slide";
 import { createSolutionSlide, solutionAnimationFrames, SOLUTION_FRAME_SECONDS, solutionSlideSizes, type SolutionSlideState } from "@/lib/pedagogy-solution-slide";
 
@@ -32,6 +33,8 @@ export type PedagogyFileRenderOptions = {
   onProgress?: (progress: PedagogyRenderProgress) => void;
   /** Pack narration: trim clip-edge silence and place lines back to back, ignoring timestamps. */
   pack?: boolean;
+  /** gs_theme = journey only: a Chromium to draw the globe with (tests on machines without Playwright's own browser). */
+  journeyBrowserPath?: string;
 };
 
 export class PedagogySlideRenderError extends Error {
@@ -51,7 +54,7 @@ async function runFfmpeg(args: string[]) {
 }
 
 export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: PedagogyFileRenderOptions) {
-  const { directory, outputPath, onProgress, pack = false } = options;
+  const { directory, outputPath, onProgress, pack = false, journeyBrowserPath } = options;
   console.info("Pedagogy timing mode", { path: pack ? "packed" : "timestamps" });
   const warningMessages = pedagogyWarnings(rows);
   if (warningMessages.length) console.warn("Pedagogy renderer warnings", { count: warningMessages.length });
@@ -145,7 +148,32 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const missingPictures = [...pictures].filter(([, image]) => !image).map(([file]) => file);
   if (pictures.size) console.info("Pedagogy look pictures", { pictures: pictures.size - missingPictures.length, path: missingPictures.length ? "missing-picture-placeholder" : "picture-files", missingPictures });
   if (lookRows.length) console.info("Pedagogy look slides", { rows: lookRows.length, logos: logos.size - missingLogos.length, path: missingLogos.length ? "logo-name-tiles" : "logo-files", missingLogos });
-  for (const [index, row] of timeline.rows.entries()) {
+  // gs_theme = journey: the whole video is one continuous 3D Earth (pedagogy-journey.ts); other sheets skip this.
+  const journeyRows = timeline.rows.filter((row) => row.journey).length;
+  console.info("Pedagogy generation type", { path: journeyRows ? "journey" : timeline.rows.some((row) => row.gsTheme === "cinematic") ? "cinematic-not-built-todays-look" : "todays-look", journeyRows });
+  if (journeyRows) {
+    const chapters = [...new Set(timeline.rows.map((row) => row.journey?.chapter ?? "").filter(Boolean))];
+    const journey = await openJourneyRenderer({ executablePath: journeyBrowserPath });
+    let frameCount = 0;
+    try {
+      for (const [index, row] of timeline.rows.entries()) {
+        if (!row.journey) throw new PedagogyBriefValidationError(`Row ${row.sourceRow}: a journey sheet needs gs_theme = journey from its first row.`);
+        const previous = index > 0 ? timeline.rows[index - 1].journey : null;
+        for (const { state, duration } of planJourneyRow(row.journey, previous, row.allocatedDuration, chapters)) {
+          const framePath = join(directory, `journey-${String(frameCount).padStart(5, "0")}.png`);
+          frameCount += 1;
+          await writeFile(framePath, await journey.frame(state));
+          concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+          lastFrame = framePath;
+        }
+        onProgress?.({ phase: "rendering-slides", completed: index + 1, total: rows.length });
+      }
+    } finally {
+      await journey.close();
+    }
+    console.info("Pedagogy journey frames", { frames: frameCount, rows: journeyRows });
+  }
+  for (const [index, row] of (journeyRows ? [] : timeline.rows).entries()) {
     const framePrefix = join(directory, `frame-${String(index).padStart(4, "0")}`);
     try {
       if (row.layout === "passage") {
