@@ -49,7 +49,7 @@ test("parsers and the write-back round trip", () => {
   const camera = parseJourneyCamera("26.5, 83, 4.6, 0.95");
   const { pins, cardLines } = parseJourneyLabels("29.5, 81 = air sinks = blue | 26.4, 83 = high pressure");
   const effects = parseJourneyEffects("glow 26.3,83 orange 1.5 0.55 | sink 26.4,83 | ring 26.4,83 | arc 31,175 > 44,-147 yellow | path 29,165 > 27,83");
-  const columns = journeyToColumns({ camera, pins, cardLines, effects, caption: "c", sourceTs: "5:46", badge: "B", chapter: "India" });
+  const columns = journeyToColumns({ camera, pins, cardLines, effects, caption: "c", sourceTs: "5:46", badge: "B", chapter: "India", notes: [], notesTitle: "" });
   assert.deepEqual(parseJourneyCamera(columns.camera), camera);
   assert.deepEqual(parseJourneyLabels(columns.anchoredLabels).pins, pins);
   assert.deepEqual(parseJourneyEffects(columns.effects), effects);
@@ -65,7 +65,7 @@ test("camera flights start and end on the given views; long flights pull back", 
 });
 
 test("a row's frames fill exactly its spoken time", () => {
-  const spec = { camera: parseJourneyCamera("30, 175, 11, 0"), pins: [], cardLines: [], effects: [], caption: "x", sourceTs: "", badge: "", chapter: "Where" };
+  const spec = { camera: parseJourneyCamera("30, 175, 11, 0"), pins: [], cardLines: [], effects: [], caption: "x", sourceTs: "", badge: "", chapter: "Where", notes: [], notesTitle: "" };
   const previous = { ...spec, camera: parseJourneyCamera("25, 130, 12.5, 0"), caption: "y" };
   const frames = planJourneyRow(spec, previous, 7.3, ["Where"]);
   assert.ok(frames.length > 1 && frames.length <= Math.ceil(2.6 * JOURNEY_FPS) + 1);
@@ -73,4 +73,25 @@ test("a row's frames fill exactly its spoken time", () => {
   assert.deepEqual(frames.at(-1)!.state.camera, spec.camera);
   // nothing new and no move: one held frame
   assert.equal(planJourneyRow(spec, spec, 4, ["Where"]).length, 1);
+});
+
+test("notes: `note` adds a point, `notes` replaces the list, a new question starts clean; only the new point fades in", () => {
+  const rows = validatePedagogyRows([
+    row(1, { gsTheme: "journey", notesTitle: "Formation", note: "Sea temp *≥ 27°C*" }),
+    row(2, { note: "Only over *water*" }),
+    row(3, { questionId: "Q2" }),
+    row(4, { questionId: "Q2", notes: "a | b" }),
+  ]);
+  assert.deepEqual(rows[1].journey?.notes, ["Sea temp *≥ 27°C*", "Only over *water*"]);
+  assert.equal(rows[1].journey?.notesTitle, "Formation");
+  assert.deepEqual(rows[2].journey?.notes, []);
+  assert.deepEqual(rows[3].journey?.notes, ["a", "b"]);
+  const frames = planJourneyRow(rows[1].journey!, rows[0].journey!, 4, []);
+  assert.equal(frames[0].state.notes[0].k, 1);
+  assert.ok(frames[0].state.notes[1].k < 1);
+  assert.equal(frames.at(-1)!.state.notes[1].k, 1);
+  assert.throws(() => validatePedagogyRows([row(1, { gsTheme: "journey", note: "*open" })]), /Row 2: a note has an unclosed/);
+  assert.throws(() => validatePedagogyRows([row(1, { gsTheme: "journey", notes: "1|2|3|4|5|6|7" })]), /Row 2: a topic can have at most 6/);
+  // a sheet without notes columns keeps no panel
+  assert.deepEqual(validatePedagogyRows([row(1, { gsTheme: "journey" })])[0].journey?.notes, []);
 });

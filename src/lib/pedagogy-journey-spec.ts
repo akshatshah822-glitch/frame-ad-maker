@@ -26,7 +26,12 @@ export type JourneySpec = {
   sourceTs: string;
   badge: string;
   chapter: string;
+  /** Notes panel: this topic's key points so far (newest last) and its heading. Empty = no panel. */
+  notes: string[];
+  notesTitle: string;
 };
+
+export const JOURNEY_MAX_NOTES = 6;
 
 /** The view used before the first row names a camera: the whole Earth, Asia and the Pacific. */
 export const JOURNEY_DEFAULT_CAMERA: JourneyCamera = { lat: 25, lon: 130, distance: 12.5, tilt: 0 };
@@ -128,5 +133,7 @@ export function journeyToColumns(spec: JourneySpec) {
     sourceTs: spec.sourceTs,
     badge: spec.badge,
     chapter: spec.chapter,
+    notes: spec.notes.join(" | "),
+    notesTitle: spec.notesTitle,
   };
 }

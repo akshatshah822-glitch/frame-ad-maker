@@ -51,5 +51,8 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     sourceTs: row.source_ts,
     badge: row.badge,
     chapter: row.chapter,
+    note: row.note,
+    notes: row.notes,
+    notesTitle: row.notes_title,
   } satisfies PedagogyBriefInputRow));
 }

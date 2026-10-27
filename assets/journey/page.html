@@ -37,7 +37,8 @@ scene.add(new THREE.Mesh(new THREE.SphereGeometry(R0 * 1.035, 96, 64), new THREE
 const fx = new THREE.Group(); scene.add(fx);
 const glowTex = {}; const glowMap = (c) => glowTex[c] ||= (() => { const cv = document.createElement("canvas"); cv.width = cv.height = 256; const g = cv.getContext("2d"); const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128); gr.addColorStop(0, GLOW[c]); gr.addColorStop(0.5, GLOW[c].replace(",1)", ",0.45)")); gr.addColorStop(1, "rgba(0,0,0,0)"); g.fillStyle = gr; g.fillRect(0, 0, 256, 256); return new THREE.CanvasTexture(cv); })();
 const onSurface = (m, lat, lon, h = 1.004) => { const p = ll(lat, lon, R0 * h); m.position.copy(p); m.lookAt(p.clone().multiplyScalar(2)); fx.add(m); return m; };
-const curve = (a, b, lift) => { const pa = ll(a[0], a[1], R0 * 1.02), pb = ll(b[0], b[1], R0 * 1.02); return new THREE.QuadraticBezierCurve3(pa, pa.clone().add(pb).multiplyScalar(0.5).normalize().multiplyScalar(R0 * lift), pb); };
+// The arch height grows with the distance: an ocean-wide arc lifts high, a short coastal track hugs the surface.
+const curve = (a, b, lift) => { const pa = ll(a[0], a[1], R0 * 1.02), pb = ll(b[0], b[1], R0 * 1.02); lift = 1 + (lift - 1) * Math.min(1, pa.angleTo(pb) / 0.6); return new THREE.QuadraticBezierCurve3(pa, pa.clone().add(pb).multiplyScalar(0.5).normalize().multiplyScalar(R0 * lift), pb); };
 function addEffect(e, k) {
   if (k <= 0) return;
   if (e.kind === "glow") { const m = onSurface(new THREE.Mesh(new THREE.PlaneGeometry(e.width, e.height), new THREE.MeshBasicMaterial({ map: glowMap(e.colour), transparent: true, opacity: k, depthWrite: false, blending: THREE.AdditiveBlending })), e.lat, e.lon); m.rotateZ(0.35); }
@@ -65,15 +66,19 @@ window.renderJourney = (st) => {
   const whole = Math.max(0, Math.min(1, (distance - 9) / 4));
   camera.lookAt(ll(lat, lon, R0 * (1 - whole)));
   sun.position.copy(camera.position.clone().add(new THREE.Vector3(-6, 8, 2)));
+  if (st.notes?.length) camera.setViewOffset(W, H, 260, 0, W, H); else camera.clearViewOffset();
   renderer.render(scene, camera);
   // labels pinned to the globe (hidden when the point is behind the Earth)
   let fg = "", labels = "";
   const camDir = camera.position.clone().normalize();
   const placed = [];
   st.pins.forEach((pin, i) => { if (pin.k <= 0) return; const p3 = ll(pin.lat, pin.lon, R0 * 1.01); if (p3.clone().normalize().dot(camDir) < 0.12) return; const p = p3.clone().project(camera); const x = (p.x + 1) / 2 * W, y = (1 - p.y) / 2 * H;
-    if (x < 40 || x > W - 40 || y < 120 || y > H - 150) return; const right = x < W * 0.62, dx = right ? 120 : -120;
-    // Labels never overlap each other and stay clear of the header and the caption bar.
-    const width = pin.text.length * 17 + 20, left = right ? x + dx : x + dx - width;
+    const edge = st.notes?.length ? 1270 : W - 40; // with notes, labels stay left of the notes panel
+    if (x < 40 || x > edge || y < 120 || y > H - 150) return;
+    // Labels never overlap each other or the notes panel, and stay clear of the header and the caption bar.
+    const width = pin.text.length * 17 + 20;
+    const right = x < W * 0.62 ? x + 120 + width <= edge : x - 120 - width < 40, dx = right ? 120 : -120;
+    const left = right ? x + dx : x + dx - width;
     let dy = [-110, 60, -30, 140, -170, 110][i % 6];
     const clash = (top) => placed.some((b) => left < b.right && left + width > b.left && top < b.bottom && top + 44 > b.top);
     for (let tries = 0; tries < 12 && (clash(y + dy - 22) || y + dy < 130 || y + dy > H - 170); tries += 1) dy = dy + (y + dy > H - 170 ? -56 : 56);
@@ -88,6 +93,24 @@ window.renderJourney = (st) => {
       + `<line x1="142" y1="${top}" x2="142" y2="${top + h}" stroke="#e57373" stroke-width="2.5"/>` + lines.map((l, i) => `<text x="160" y="${top + 54 + i * 52}" font-family="KalamH" font-size="32" fill="#1f2a44">${esc(l)}</text>`).join("") + `</g>`; }
   fg += `<rect x="96" y="44" width="300" height="48" rx="24" fill="#1d3557" opacity="0.9"/><text x="246" y="77" text-anchor="middle" font-family="Arial" font-size="22" letter-spacing="2" fill="#8cc4ff">GS · GEOGRAPHY</text>`;
   if (st.badge) fg += `<rect x="410" y="44" width="${st.badge.length * 14 + 50}" height="48" rx="24" fill="none" stroke="#ffd166" stroke-width="2"/><text x="${410 + (st.badge.length * 14 + 50) / 2}" y="76" text-anchor="middle" font-family="Arial" font-weight="700" font-size="21" fill="#ffd166">${esc(st.badge)}</text>`;
+  // Topper's notes panel: key points of this topic, newest at the bottom; *starred* words in a highlight colour.
+  if (st.notes?.length) {
+    const X = 1300, Y = 120, PW = 560;
+    const lines = [];
+    st.notes.forEach((note, i) => { const words = note.text.split(/\s+/); let cur = ""; const out = []; for (const w of words) { const plain = (cur + " " + w).replace(/\*/g, "").trim(); if (plain.length > 30 && cur) { out.push(cur); cur = w; } else cur = (cur + " " + w).trim(); } if (cur) out.push(cur); out.forEach((l, j) => lines.push({ l, first: j === 0, k: note.k, last: i === st.notes.length - 1 })); });
+    const PH = Math.max(300, 120 + lines.length * 50);
+    fg += `<rect x="${X + 6}" y="${Y + 8}" width="${PW}" height="${PH}" rx="12" fill="#000" opacity="0.4"/><rect x="${X}" y="${Y}" width="${PW}" height="${PH}" rx="12" fill="#fdfaf0"/>`
+      + `<line x1="${X + 52}" y1="${Y}" x2="${X + 52}" y2="${Y + PH}" stroke="#e57373" stroke-width="2.5"/>`
+      + Array.from({ length: Math.floor((PH - 70) / 50) }, (_, i) => `<line x1="${X}" y1="${Y + 92 + i * 50}" x2="${X + PW}" y2="${Y + 92 + i * 50}" stroke="#c9dcef" stroke-width="2"/>`).join("")
+      + `<text x="${X + 70}" y="${Y + 52}" font-family="KalamH" font-weight="700" font-size="32" fill="#c62828">Notes: ${esc(st.notesTitle || "")}</text><path d="M${X + 70} ${Y + 62} q 40 6 80 0 t 80 0" stroke="#c62828" stroke-width="2.5" fill="none"/>`;
+    lines.forEach((line, i) => {
+      const y = Y + 84 + i * 50;
+      const runs = line.l.split("*").map((part, j) => j % 2 ? `<tspan fill="#c2185b" font-weight="700">${esc(part)}</tspan>` : esc(part)).join("");
+      const plainLen = line.l.replace(/\*/g, "").length;
+      if (line.last) fg += `<rect x="${X + 64}" y="${y + 18}" width="${Math.min(PW - 80, plainLen * 15.5 + 16) * line.k}" height="22" rx="4" fill="#ffd54f" opacity="0.55"/>`;
+      fg += `<text x="${X + 70}" y="${y + 36}" font-family="KalamH" font-size="29" fill="#1f2a44" opacity="${line.k}">${line.first ? "• " : "&#160;&#160;"}${runs}</text>`;
+    });
+  }
   const cw = 108, cx0 = 1824 - st.chapters.length * cw + 10;
   st.chapters.forEach((c, i) => { const x = cx0 + i * cw; fg += `<rect x="${x}" y="52" width="98" height="10" rx="5" fill="${i < st.chapterIndex ? "#ffd166" : i === st.chapterIndex ? "#ffe9a8" : "#263552"}"/><text x="${x + 49}" y="88" text-anchor="middle" font-family="Arial" font-size="17" fill="${i === st.chapterIndex ? "#ffd166" : "#56627a"}">${esc(c)}</text>`; });
   if (st.caption) { const size = st.caption.length > 70 ? 28 : 33; fg += `<g opacity="${st.captionK}"><rect x="160" y="955" width="1600" height="78" rx="39" fill="#02050b" opacity="0.85"/><text x="900" y="1005" text-anchor="middle" font-family="KalamH" font-size="${size}" fill="#e8eef9">“${esc(st.caption)}”</text>${st.ts ? `<rect x="1640" y="973" width="96" height="42" rx="21" fill="#263552"/><text x="1688" y="1002" text-anchor="middle" font-family="Arial" font-size="20" fill="#cfd8e6">${esc(st.ts)}</text>` : ""}</g>`; }

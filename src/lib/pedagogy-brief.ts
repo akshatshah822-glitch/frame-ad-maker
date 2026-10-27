@@ -2,7 +2,7 @@ import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 import { diagramNames, diagramStepCount } from "@/lib/pedagogy-diagram-slide";
 import { parsePedagogyVisual, pedagogyVisualLabels, PedagogyVisualParseError } from "@/lib/pedagogy-visual";
 import { INFOGRAPHIC_KINDS, INFOGRAPHIC_MAX_ITEMS, infographicItems, isInfographic } from "@/lib/pedagogy-infographic";
-import { JOURNEY_DEFAULT_CAMERA, JourneyParseError, parseGsTheme, parseJourneyCamera, parseJourneyEffects, parseJourneyLabels, type JourneyCamera, type JourneyEffect, type JourneyPin, type JourneySpec } from "@/lib/pedagogy-journey-spec";
+import { JOURNEY_DEFAULT_CAMERA, JOURNEY_MAX_NOTES, JourneyParseError, parseGsTheme, parseJourneyCamera, parseJourneyEffects, parseJourneyLabels, type JourneyCamera, type JourneyEffect, type JourneyPin, type JourneySpec } from "@/lib/pedagogy-journey-spec";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, SOLUTION_MAX_CARDS, solutionItems, SolutionParseError } from "@/lib/pedagogy-solution";
 export const pedagogyRequiredColumns = ["question_id", "line_no", "time", "sir_ka_vaakya", "board"] as const;
 
@@ -70,6 +70,13 @@ export type PedagogyBriefInputRow = {
   /** Optional, journey only: header badge (e.g. NEW CONCEPT) and progress-bar chapter. Carry forward through the sheet. */
   badge?: unknown;
   chapter?: unknown;
+  /** Optional, journey only: key points for the notes panel on the right. `note` adds one point to this topic's notes;
+   * `notes` ("a | b | c") replaces the whole list. *starred* words are highlighted. Carry forward within a question_id.
+   * Older sheets have neither column, so they show no notes panel. */
+  note?: unknown;
+  notes?: unknown;
+  /** Optional, journey only: the notes panel heading. Carries forward within a question_id. */
+  notesTitle?: unknown;
 };
 
 export type PedagogyArc = { from: number; to: number; below: boolean };
@@ -297,6 +304,9 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       sourceTsText: valueAsText(input.sourceTs).trim(),
       badgeText: valueAsText(input.badge).trim(),
       chapterText: valueAsText(input.chapter).trim(),
+      noteText: valueAsText(input.note).trim(),
+      notesText: valueAsText(input.notes).trim(),
+      notesTitleText: valueAsText(input.notesTitle).trim(),
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
@@ -324,6 +334,8 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedCaption = { caption: "", sourceTs: "" };
   let retainedBadge = "";
   let retainedChapter = "";
+  let retainedNoteLines: string[] = [];
+  let retainedNotesTitle = "";
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row, index) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -357,6 +369,8 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       retainedCardLines = [];
       retainedEffects = [];
       retainedCaption = { caption: "", sourceTs: "" };
+      retainedNoteLines = [];
+      retainedNotesTitle = "";
     }
     try {
       if (row.gsThemeText) retainedGsTheme = parseGsTheme(row.gsThemeText);
@@ -370,6 +384,11 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     if (row.captionText || row.sourceTsText) retainedCaption = { caption: row.captionText, sourceTs: row.sourceTsText };
     if (row.badgeText) retainedBadge = row.badgeText;
     if (row.chapterText) retainedChapter = row.chapterText;
+    if (row.notesText) retainedNoteLines = row.notesText.split("|").map((line) => line.trim()).filter(Boolean);
+    if (row.noteText) retainedNoteLines = [...retainedNoteLines, row.noteText];
+    if (retainedNoteLines.length > JOURNEY_MAX_NOTES) throw rowError(row.sourceRow, `a topic can have at most ${JOURNEY_MAX_NOTES} notes; start a new question_id or shorten the list.`);
+    if (retainedNoteLines.some((line) => (line.match(/\*/g)?.length ?? 0) % 2)) throw rowError(row.sourceRow, "a note has an unclosed * highlight.");
+    if (row.notesTitleText) retainedNotesTitle = row.notesTitleText;
     let diagram = "";
     let diagramStep = 0;
     if (row.layout === "diagram") {
@@ -443,11 +462,11 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       effectiveSteps = retainedSteps;
     }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, trapText, trickText, rememberText, gsThemeText, cameraText, labelsText, effectsText, captionText, sourceTsText, badgeText, chapterText, ...rest } = row;
+    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, trapText, trickText, rememberText, gsThemeText, cameraText, labelsText, effectsText, captionText, sourceTsText, badgeText, chapterText, noteText, notesText, notesTitleText, ...rest } = row;
     void themeText; void trapText; void trickText; void rememberText;
-    void gsThemeText; void cameraText; void labelsText; void effectsText; void captionText; void sourceTsText; void badgeText; void chapterText;
+    void gsThemeText; void cameraText; void labelsText; void effectsText; void captionText; void sourceTsText; void badgeText; void chapterText; void noteText; void notesText; void notesTitleText;
     const journey: JourneySpec | null = retainedGsTheme === "journey"
-      ? { camera: retainedCamera, pins: retainedPins, cardLines: retainedCardLines, effects: retainedEffects, caption: retainedCaption.caption, sourceTs: retainedCaption.sourceTs, badge: retainedBadge, chapter: retainedChapter }
+      ? { camera: retainedCamera, pins: retainedPins, cardLines: retainedCardLines, effects: retainedEffects, caption: retainedCaption.caption, sourceTs: retainedCaption.sourceTs, badge: retainedBadge, chapter: retainedChapter, notes: retainedNoteLines, notesTitle: retainedNotesTitle }
       : null;
     const solution = row.layout === "solution";
     void drawText;

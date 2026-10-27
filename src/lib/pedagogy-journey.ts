@@ -36,6 +36,8 @@ export type JourneyFrameState = {
   badge: string;
   chapters: string[];
   chapterIndex: number;
+  notes: { text: string; k: number }[];
+  notesTitle: string;
 };
 
 /** Frames for one row: a flight (if the camera moves) and fade-ins (if something is new), then the finished view held. */
@@ -46,7 +48,10 @@ export function planJourneyRow(spec: JourneySpec, previous: JourneySpec | null, 
   const oldEffects = new Set((previous?.effects ?? []).map(key)), oldPins = new Set((previous?.pins ?? []).map(key));
   const sameCard = key(spec.cardLines) === key(previous?.cardLines ?? []);
   const sameCaption = spec.caption === (previous?.caption ?? "");
-  const somethingNew = spec.effects.some((effect) => !oldEffects.has(key(effect))) || spec.pins.some((pin) => !oldPins.has(key(pin))) || !sameCaption || !sameCard;
+  // A note is old only if the previous row showed the same note at the same place in the same topic's list.
+  const sameNotesTopic = spec.notesTitle === (previous?.notesTitle ?? "");
+  const oldNote = (text: string, i: number) => sameNotesTopic && (previous?.notes ?? [])[i] === text;
+  const somethingNew = spec.notes.some((text, i) => !oldNote(text, i)) || spec.effects.some((effect) => !oldEffects.has(key(effect))) || spec.pins.some((pin) => !oldPins.has(key(pin))) || !sameCaption || !sameCard;
   const move = moved ? Math.min(2.6, span * 0.55) : 0;
   const reveal = somethingNew ? Math.min(1.1, span * 0.5) : 0;
   const animation = Math.max(move, reveal);
@@ -66,6 +71,7 @@ export function planJourneyRow(spec: JourneySpec, previous: JourneySpec | null, 
         cardLines: spec.cardLines, cardK: sameCard ? 1 : fade,
         caption: spec.caption, ts: spec.sourceTs, captionK: sameCaption ? 1 : Math.min(1, (t * animation) / 0.3),
         badge: spec.badge, chapters, chapterIndex: chapters.indexOf(spec.chapter),
+        notes: spec.notes.map((text, i) => ({ text, k: oldNote(text, i) ? 1 : fade })), notesTitle: spec.notesTitle,
       },
     });
   }
