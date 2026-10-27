@@ -63,7 +63,7 @@ export function planJourneyRow(spec: JourneySpec, previous: JourneySpec | null, 
         effects: spec.effects.map((effect) => ({ effect, k: oldEffects.has(key(effect)) ? 1 : fade })),
         pins: spec.pins.map((pin) => ({ ...pin, k: oldPins.has(key(pin)) ? 1 : fade })),
         cardLines: spec.cardLines, cardK: sameCard ? 1 : fade,
-        caption: spec.caption, ts: spec.sourceTs, captionK: sameCaption ? 1 : Math.min(1, fade * 2),
+        caption: spec.caption, ts: spec.sourceTs, captionK: sameCaption ? 1 : Math.min(1, (t * animation) / 0.3),
         badge: spec.badge, chapters, chapterIndex: chapters.indexOf(spec.chapter),
       },
     });
