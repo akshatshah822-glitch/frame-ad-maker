@@ -69,8 +69,15 @@ window.renderJourney = (st) => {
   // labels pinned to the globe (hidden when the point is behind the Earth)
   let fg = "", labels = "";
   const camDir = camera.position.clone().normalize();
+  const placed = [];
   st.pins.forEach((pin, i) => { if (pin.k <= 0) return; const p3 = ll(pin.lat, pin.lon, R0 * 1.01); if (p3.clone().normalize().dot(camDir) < 0.12) return; const p = p3.clone().project(camera); const x = (p.x + 1) / 2 * W, y = (1 - p.y) / 2 * H;
-    if (x < 40 || x > W - 40 || y < 120 || y > H - 150) return; const right = x < W * 0.62, dx = right ? 120 : -120, dy = [-110, 60, -30, 140, -170, 110][i % 6];
+    if (x < 40 || x > W - 40 || y < 120 || y > H - 150) return; const right = x < W * 0.62, dx = right ? 120 : -120;
+    // Labels never overlap each other and stay clear of the header and the caption bar.
+    const width = pin.text.length * 17 + 20, left = right ? x + dx : x + dx - width;
+    let dy = [-110, 60, -30, 140, -170, 110][i % 6];
+    const clash = (top) => placed.some((b) => left < b.right && left + width > b.left && top < b.bottom && top + 44 > b.top);
+    for (let tries = 0; tries < 12 && (clash(y + dy - 22) || y + dy < 130 || y + dy > H - 170); tries += 1) dy = dy + (y + dy > H - 170 ? -56 : 56);
+    placed.push({ left, right: left + width, top: y + dy - 22, bottom: y + dy + 22 });
     fg += `<g opacity="${pin.k}"><line x1="${x}" y1="${y}" x2="${x + dx}" y2="${y + dy}" stroke="${C[pin.colour]}" stroke-width="2"/><circle cx="${x}" cy="${y}" r="5" fill="${C[pin.colour]}"/></g>`;
     labels += `<div class="lab" style="opacity:${pin.k};left:${x + dx + (right ? 8 : -8)}px;top:${y + dy - 22}px;color:${C[pin.colour]};${right ? "" : "transform:translateX(-100%)"}">${esc(pin.text)}</div>`; });
   if (st.cardLines.length) {
