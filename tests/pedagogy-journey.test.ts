@@ -95,3 +95,37 @@ test("notes: `note` adds a point, `notes` replaces the list, a new question star
   // a sheet without notes columns keeps no panel
   assert.deepEqual(validatePedagogyRows([row(1, { gsTheme: "journey" })])[0].journey?.notes, []);
 });
+
+test("gs_theme = atlas: scenes, items and chapter cards; a new question starts on the globe; bad items stop the sheet", () => {
+  const rows = validatePedagogyRows([
+    row(1, { gsTheme: "atlas", questionText: "Cyclone Arnab", chapterCard: "Strength | A severe cyclonic storm", scene: "bars", sceneTitle: "How strong? | km/h", sceneItems: "< 31 = Low = 0.8 | 145–168 = Arnab = 6.6 = hot", note: "a" }),
+    row(2, { note: "b" }),
+    row(3, { questionId: "Q2", effects: "storm 15,88.5 1.8" }),
+  ]);
+  assert.equal(rows[0].gsTheme, "atlas");
+  assert.equal(rows[1].journey?.atlas?.scene, "bars");
+  assert.equal(rows[1].journey?.atlas?.items[1][3], "hot");
+  assert.equal(rows[0].journey?.atlas?.chapterCard?.title, "Strength");
+  assert.equal(rows[1].journey?.atlas?.chapterCard, null);
+  assert.equal(rows[2].journey?.atlas?.scene, "globe");
+  assert.equal(rows[2].journey?.atlas?.headline, "Cyclone Arnab");
+  assert.deepEqual(rows[2].journey?.effects[0], { kind: "storm", lat: 15, lon: 88.5, size: 1.8 });
+  // the reviewed row written back as columns validates to the same spec
+  const back = validatePedagogyRows([row(1, { gsTheme: "atlas", questionText: "Cyclone Arnab", ...journeyToColumns(rows[1].journey!) })]);
+  assert.deepEqual(back[0].journey?.atlas?.items, rows[1].journey?.atlas?.items);
+  assert.throws(() => validatePedagogyRows([row(1, { gsTheme: "atlas", scene: "bars", sceneItems: "only one = x = 1" })]), /Row 2: a bars scene needs 2 to 8/);
+  assert.throws(() => validatePedagogyRows([row(1, { gsTheme: "atlas", scene: "map" })]), /Row 2: scene must be one of/);
+  assert.throws(() => validatePedagogyRows([row(1, { gsTheme: "atlas", scene: "cards" })]), /Row 2: a cards scene needs scene_items/);
+});
+
+test("atlas frames: every frame drawn at JOURNEY_FPS, filling the row's time; notes page opens on a topic's last row", async () => {
+  const { planAtlasRow } = await import("../src/lib/pedagogy-journey");
+  const [first] = validatePedagogyRows([row(1, { gsTheme: "atlas", chapter: "Hook", chapterCard: "Cyclone Arnab | why", notesTitle: "T", notes: "a | b" })]);
+  const frames = planAtlasRow(first.journey!, null, 5.05, { start: 0, sceneStart: 0, chapters: ["Hook"], lastOfTopic: true });
+  assert.equal(frames.length, Math.floor(5.05 * JOURNEY_FPS));
+  assert.ok(Math.abs(frames.reduce((sum, frame) => sum + frame.duration, 0) - 5.05) < 1e-9);
+  assert.equal(frames[0].state.cardK, 1);
+  assert.equal(frames[0].state.fade, 1);
+  assert.equal(frames.at(-1)!.state.notesK, 1);
+  assert.equal(frames.at(-1)!.state.cardK, 0);
+});

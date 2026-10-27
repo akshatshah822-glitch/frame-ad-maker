@@ -79,20 +79,97 @@ export function planJourneyRow(spec: JourneySpec, previous: JourneySpec | null, 
 }
 
 
+// ---------- Theme 5: Atlas (gs_theme = atlas) ----------
+// Every frame is drawn (the storm turns, dots travel, the camera drifts), at JOURNEY_FPS.
+export type AtlasFrameState = {
+  t: number;
+  sceneT: number;
+  scene: { kind: string; title: string; subtitle: string; items: string[][] };
+  camera: JourneyCamera;
+  effects: { effect: JourneySpec["effects"][number]; k: number }[];
+  pins: (JourneySpec["pins"][number] & { k: number })[];
+  header: { badge: string; headline: string; chapters: string[]; at: number };
+  chip: string; chipK: number;
+  notes: { title: string; lines: string[] } | null; notesK: number;
+  card: { n: string; title: string; question: string } | null; cardK: number;
+  fade: number;
+};
+export type AtlasRowContext = {
+  /** Video time when this row starts, and when the scene now on screen first appeared. */
+  start: number;
+  sceneStart: number;
+  chapters: string[];
+  /** The last row of its question_id: the topic's notes page opens over its second half. */
+  lastOfTopic: boolean;
+};
+export const atlasSceneKey = (spec: JourneySpec) => spec.atlas?.scene === "globe" || !spec.atlas ? "globe" : JSON.stringify([spec.atlas.scene, spec.atlas.items, spec.atlas.sceneTitle]);
+
+export function planAtlasRow(spec: JourneySpec, previous: JourneySpec | null, duration: number, context: AtlasRowContext) {
+  const atlas = spec.atlas!;
+  const span = Math.max(1 / JOURNEY_FPS, duration);
+  // Whole frames, the last one holding the remainder, so the frames add up exactly to the row's spoken time.
+  const count = Math.max(1, Math.floor(span * JOURNEY_FPS + 1e-9));
+  const sameScene = previous !== null && atlasSceneKey(previous) === atlasSceneKey(spec);
+  const onGlobe = atlas.scene === "globe";
+  const from = sameScene && onGlobe ? previous!.camera : spec.camera;
+  const moved = key(from) !== key(spec.camera);
+  const move = moved ? Math.min(2.6, span * 0.55) : 0;
+  const oldEffects = new Set((sameScene ? previous!.effects : []).map(key)), oldPins = new Set((sameScene ? previous!.pins : []).map(key));
+  const revealAt = moved ? move * 0.5 : 0.2;
+  const chip = spec.notes.at(-1) ?? "";
+  const newChip = chip !== (previous?.notes.at(-1) ?? "") || !sameScene;
+  const notesFrom = context.lastOfTopic && spec.notes.length >= 2 ? span * 0.45 : Infinity;
+  const card = atlas.chapterCard;
+  const cardEnd = card ? Math.min(2.8, span * 0.5) : 0;
+  const chapterAt = context.chapters.indexOf(spec.chapter);
+  const frames: { state: AtlasFrameState; duration: number }[] = [];
+  for (let frame = 0; frame < count; frame += 1) {
+    const local = frame / JOURNEY_FPS, t = context.start + local;
+    const flight = move ? Math.min(1, local / move) : 1;
+    const fade = (moment: number, length: number) => Math.min(1, Math.max(0, (local - moment) / length));
+    const reveal = fade(revealAt, 0.9);
+    const base = moved && flight < 1 ? journeyCameraAt(from, spec.camera, flight) : spec.camera;
+    // A slow drift so the globe is never frozen.
+    const camera = { ...base, lat: base.lat + 0.5 * Math.sin(t / 9), lon: base.lon + 1.0 * Math.sin(t / 7) };
+    const notesK = fade(notesFrom, 0.5);
+    const cardK = card ? (local < cardEnd - 0.45 ? 1 : 1 - fade(cardEnd - 0.45, 0.45)) : 0;
+    frames.push({
+      duration: frame === count - 1 ? span - (count - 1) / JOURNEY_FPS : 1 / JOURNEY_FPS,
+      state: {
+        t, sceneT: t - context.sceneStart,
+        scene: { kind: atlas.scene, title: atlas.sceneTitle, subtitle: atlas.sceneSubtitle, items: atlas.items },
+        camera,
+        effects: spec.effects.map((effect) => ({ effect, k: oldEffects.has(key(effect)) ? 1 : reveal })),
+        pins: spec.pins.map((pin) => ({ ...pin, k: oldPins.has(key(pin)) ? 1 : reveal })),
+        header: { badge: spec.badge, headline: atlas.headline, chapters: context.chapters, at: chapterAt },
+        chip, chipK: (newChip ? fade(card ? cardEnd : 0.15, 0.4) : 1) * (1 - notesK),
+        notes: spec.notes.length ? { title: spec.notesTitle, lines: spec.notes } : null, notesK,
+        card: card ? { n: `CHAPTER ${chapterAt + 1}  ·  ${spec.chapter.toUpperCase()}`, title: card.title, question: card.question } : null, cardK,
+        fade: sameScene ? 0 : 1 - fade(0, 0.45),
+      },
+    });
+  }
+  return frames;
+}
+
 /** Files the page asks for, all from this repo. */
 async function asset(path: string) {
   const root = process.cwd();
   const name = path.replace(/^\/+/, "");
   if (name === "" || name === "page.html") return { body: await readFile(join(root, "assets", "journey", "page.html")), type: "text/html; charset=utf-8" };
   if (name === "three.module.js") return { body: await readFile(join(root, "node_modules", "three", "build", "three.module.js")), type: "text/javascript" };
+  if (name === "atlas.html") return { body: await readFile(join(root, "assets", "atlas", "page.html")), type: "text/html; charset=utf-8" };
+  if (name === "land-50m.json") return { body: await readFile(join(root, "assets", "atlas", "land-50m.json")), type: "application/json" };
+  if (name === "topojson-client.min.js") return { body: await readFile(join(root, "assets", "atlas", "topojson-client.min.js")), type: "text/javascript" };
   if (name === "earth-board.png") return { body: await readFile(join(root, "assets", "journey", "earth-board.png")), type: "image/png" };
-  const font = /^fonts\/((itim|kalam)-[a-z0-9-]+\.(woff2?))$/.exec(name);
+  const font = /^fonts\/((itim|kalam|inter)-[a-z0-9-]+\.(woff2?))$/.exec(name);
   if (font) return { body: await readFile(join(root, "assets", "fonts", font[2], font[1])), type: font[3] === "woff2" ? "font/woff2" : "font/woff" };
   return null;
 }
 
 /** A hidden browser with the journey page loaded. The browser path that ran is logged. */
-export async function openJourneyRenderer(options: { executablePath?: string } = {}) {
+export async function openJourneyRenderer(options: { executablePath?: string; theme?: "journey" | "atlas" } = {}) {
+  const atlas = options.theme === "atlas";
   const { chromium } = await import("playwright-core");
   // Bundled Playwright Chromium first, then the Mac's own Google Chrome; GPU first, then software WebGL.
   const attempts: { label: string; launch: () => Promise<Browser> }[] = options.executablePath
@@ -116,15 +193,20 @@ export async function openJourneyRenderer(options: { executablePath?: string } =
         if (!file) return route.fulfill({ status: 404, body: "" });
         return route.fulfill({ status: 200, body: file.body, contentType: file.type });
       });
-      await page.goto(`${ORIGIN}page.html`);
+      await page.goto(`${ORIGIN}${atlas ? "atlas.html" : "page.html"}`);
       await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true, null, { timeout: 60_000 }).catch(() => {
         throw new Error(errors[0] ?? "the journey page did not finish loading");
       });
-      console.info("Pedagogy journey renderer", { path: attempt.label });
+      console.info("Pedagogy journey renderer", { path: attempt.label, theme: atlas ? "atlas" : "journey" });
       return {
         async frame(state: JourneyFrameState) {
           await page.evaluate((value) => (window as unknown as { renderJourney: (s: unknown) => boolean }).renderJourney(value), state);
           return page.screenshot({ type: "png" });
+        },
+        /** Atlas frames: every frame moves, so they are JPEG to keep thousands of frames small on disk. */
+        async atlasFrame(state: AtlasFrameState) {
+          await page.evaluate((value) => (window as unknown as { renderAtlas: (s: unknown) => boolean }).renderAtlas(value), state);
+          return page.screenshot({ type: "jpeg", quality: 90 });
         },
         close: () => browser!.close(),
       };

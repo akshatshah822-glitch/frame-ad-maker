@@ -54,5 +54,9 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     note: row.note,
     notes: row.notes,
     notesTitle: row.notes_title,
+    scene: row.scene,
+    sceneTitle: row.scene_title,
+    sceneItems: row.scene_items,
+    chapterCard: row.chapter_card,
   } satisfies PedagogyBriefInputRow));
 }

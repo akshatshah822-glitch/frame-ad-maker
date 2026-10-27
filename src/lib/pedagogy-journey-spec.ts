@@ -14,7 +14,8 @@ export type JourneyEffect =
   | { kind: "arc" | "path"; from: [number, number]; to: [number, number]; colour: JourneyColour }
   | { kind: "band"; from: number; to: number }
   | { kind: "equator" }
-  | { kind: "sink" | "ring"; lat: number; lon: number };
+  | { kind: "sink" | "ring"; lat: number; lon: number }
+  | { kind: "storm"; lat: number; lon: number; size: number };
 
 export type JourneySpec = {
   camera: JourneyCamera;
@@ -29,6 +30,23 @@ export type JourneySpec = {
   /** Notes panel: this topic's key points so far (newest last) and its heading. Empty = no panel. */
   notes: string[];
   notesTitle: string;
+  /** gs_theme = atlas only (Theme 5): which scene this row shows and the chapter title card. Absent on journey sheets. */
+  atlas?: AtlasSpec;
+};
+
+/** Theme 5 (Atlas): the globe for places, and a 3D scene drawn for a process or a set of numbers. */
+export type AtlasScene = "globe" | "cutaway" | "bars" | "cards" | "grid";
+export const ATLAS_SCENES: AtlasScene[] = ["globe", "cutaway", "bars", "cards", "grid"];
+export type AtlasSpec = {
+  scene: AtlasScene;
+  sceneTitle: string;
+  sceneSubtitle: string;
+  /** scene_items split on "|", each item split on "=" (fields trimmed). */
+  items: string[][];
+  /** Shown over the first moments of this row only (not carried forward). */
+  chapterCard: { title: string; question: string } | null;
+  /** The sheet's topic (question_text), shown small in the header. */
+  headline: string;
 };
 
 export const JOURNEY_MAX_NOTES = 6;
@@ -101,16 +119,56 @@ export function parseJourneyEffects(text: string): JourneyEffect[] {
     } else if (name === "sink" || name === "ring") {
       const [lat, lon] = point(rest);
       effects.push({ kind: name, lat, lon });
-    } else throw new JourneyParseError(`effect ${JSON.stringify(kind)} is not one of glow, arc, path, band, equator, sink, ring.`);
+    } else if (name === "storm") {
+      const match = /^(-?[\d.]+\s*,\s*-?[\d.]+)(?:\s+([\d.]+))?$/.exec(rest);
+      if (!match) throw new JourneyParseError(`storm must be "storm lat,lon [size]" (got ${JSON.stringify(item)}).`);
+      const [lat, lon] = point(match[1]);
+      effects.push({ kind: "storm", lat, lon, size: match[2] ? number(match[2], "storm size", 0.3, 6) : 1.8 });
+    } else throw new JourneyParseError(`effect ${JSON.stringify(kind)} is not one of glow, arc, path, band, equator, sink, ring, storm.`);
   }
   return effects;
 }
 
 /** The sheet-wide generation type. "cinematic" is a saved prototype that FRAME does not draw yet. */
-export function parseGsTheme(text: string): "" | "journey" | "cinematic" {
+export function parseGsTheme(text: string): "" | "journey" | "cinematic" | "atlas" {
   const value = text.trim().toLowerCase();
-  if (value === "" || value === "journey" || value === "cinematic") return value;
-  throw new JourneyParseError('gs_theme must be "journey", "cinematic", or blank.');
+  if (value === "" || value === "journey" || value === "cinematic" || value === "atlas") return value;
+  throw new JourneyParseError('gs_theme must be "journey", "atlas", "cinematic", or blank.');
+}
+
+/** scene (atlas only): globe, cutaway, bars, cards or grid. */
+export function parseAtlasScene(text: string): AtlasScene {
+  const value = text.trim().toLowerCase();
+  if ((ATLAS_SCENES as string[]).includes(value)) return value as AtlasScene;
+  throw new JourneyParseError(`scene must be one of ${ATLAS_SCENES.join(", ")} (got ${JSON.stringify(text.trim())}).`);
+}
+
+/** scene_items: "a = b = c | …". Each scene checks the fields it needs. */
+export function parseAtlasItems(scene: AtlasScene, text: string): string[][] {
+  const items = text.split("|").map((part) => part.trim()).filter(Boolean).map((item) => item.split("=").map((field) => field.trim()));
+  if (scene === "bars") {
+    if (items.length < 2 || items.length > 8) throw new JourneyParseError("a bars scene needs 2 to 8 items: \"number = name = height [= hot]\".");
+    for (const item of items) { if (item.length < 3 || item.length > 4 || !item[1]) throw new JourneyParseError(`bar ${JSON.stringify(item.join(" = "))} must be "number = name = height [= hot]".`); number(item[2], "bar height", 0.2, 10); }
+  }
+  if (scene === "cards") {
+    if (items.length < 2 || items.length > 5) throw new JourneyParseError("a cards scene needs 2 to 5 items: \"TITLE = line; line = colour [= hot]\".");
+    for (const item of items) { if (item.length < 3 || item.length > 4 || !item[0]) throw new JourneyParseError(`card ${JSON.stringify(item.join(" = "))} must be "TITLE = line; line = colour [= hot]".`); colourOf(item[2], "white"); }
+  }
+  if (scene === "grid") {
+    const match = items.length === 1 ? /^(\d+)\s*x\s*(\d+)$/i.exec(items[0][0]) : null;
+    if (!match || Number(match[1]) * Number(match[2]) > 400) throw new JourneyParseError('a grid scene needs one item: "rows x columns = side heading = side line; side line".');
+  }
+  if (scene === "cutaway") {
+    for (const item of items) if (!["eye", "condense", "inflow", "sea"].includes(item[0]) || !item[1]) throw new JourneyParseError(`cutaway label ${JSON.stringify(item.join(" = "))} must start with eye, condense, inflow or sea, then "= text [= small text]".`);
+  }
+  return items;
+}
+
+/** "Title | subtitle" (scene_title) or "Title | question" (chapter_card). */
+export function parseTitlePair(text: string) {
+  const [title, second = "", ...extra] = text.split("|").map((part) => part.trim());
+  if (extra.length || !title) throw new JourneyParseError(`a title must be "Title | second line" (got ${JSON.stringify(text.trim())}).`);
+  return [title, second] as const;
 }
 
 const place = (lat: number, lon: number) => `${lat}, ${lon}`;
@@ -121,6 +179,7 @@ function effectText(effect: JourneyEffect) {
     case "band": return `band ${effect.from},${effect.to}`;
     case "equator": return "equator";
     case "sink": case "ring": return `${effect.kind} ${effect.lat},${effect.lon}`;
+    case "storm": return `storm ${effect.lat},${effect.lon} ${effect.size}`;
   }
 }
 /** A reviewed row's journey spec written back as sheet columns, so the render sees exactly what the review checked. */
@@ -135,5 +194,11 @@ export function journeyToColumns(spec: JourneySpec) {
     chapter: spec.chapter,
     notes: spec.notes.join(" | "),
     notesTitle: spec.notesTitle,
+    ...(spec.atlas ? {
+      scene: spec.atlas.scene,
+      sceneTitle: spec.atlas.sceneTitle ? `${spec.atlas.sceneTitle} | ${spec.atlas.sceneSubtitle}` : "",
+      sceneItems: spec.atlas.items.map((item) => item.join(" = ")).join(" | "),
+      chapterCard: spec.atlas.chapterCard ? `${spec.atlas.chapterCard.title} | ${spec.atlas.chapterCard.question}` : "",
+    } : {}),
   };
 }

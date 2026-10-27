@@ -15,7 +15,7 @@ import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } fro
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
 import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps } from "@/lib/pedagogy-solution";
-import { openJourneyRenderer, planJourneyRow } from "@/lib/pedagogy-journey";
+import { atlasSceneKey, openJourneyRenderer, planAtlasRow, planJourneyRow } from "@/lib/pedagogy-journey";
 import { createBoardSlide, createBoardTrickCard, type BoardSlideState } from "@/lib/pedagogy-board-slide";
 import { createSolutionSlide, solutionAnimationFrames, SOLUTION_FRAME_SECONDS, solutionSlideSizes, type SolutionSlideState } from "@/lib/pedagogy-solution-slide";
 
@@ -150,8 +150,34 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   if (lookRows.length) console.info("Pedagogy look slides", { rows: lookRows.length, logos: logos.size - missingLogos.length, path: missingLogos.length ? "logo-name-tiles" : "logo-files", missingLogos });
   // gs_theme = journey: the whole video is one continuous 3D Earth (pedagogy-journey.ts); other sheets skip this.
   const journeyRows = timeline.rows.filter((row) => row.journey).length;
-  console.info("Pedagogy generation type", { path: journeyRows ? "journey" : timeline.rows.some((row) => row.gsTheme === "cinematic") ? "cinematic-not-built-todays-look" : "todays-look", journeyRows });
-  if (journeyRows) {
+  const atlasRows = timeline.rows.filter((row) => row.journey?.atlas).length;
+  console.info("Pedagogy generation type", { path: atlasRows ? "atlas" : journeyRows ? "journey" : timeline.rows.some((row) => row.gsTheme === "cinematic") ? "cinematic-not-built-todays-look" : "todays-look", journeyRows, atlasRows });
+  if (atlasRows) {
+    // gs_theme = atlas (Theme 5): the globe for places and 3D scenes for processes and numbers; every frame is drawn.
+    const chapters = [...new Set(timeline.rows.map((row) => row.journey?.chapter ?? "").filter(Boolean))];
+    const atlas = await openJourneyRenderer({ executablePath: journeyBrowserPath, theme: "atlas" });
+    let frameCount = 0, start = 0, sceneStart = 0;
+    try {
+      for (const [index, row] of timeline.rows.entries()) {
+        if (!row.journey?.atlas) throw new PedagogyBriefValidationError(`Row ${row.sourceRow}: an atlas sheet needs gs_theme = atlas from its first row.`);
+        const previous = index > 0 ? timeline.rows[index - 1].journey : null;
+        if (!previous || atlasSceneKey(previous) !== atlasSceneKey(row.journey)) sceneStart = start;
+        const next = timeline.rows[index + 1];
+        for (const { state, duration } of planAtlasRow(row.journey, previous, row.allocatedDuration, { start, sceneStart, chapters, lastOfTopic: !next || next.questionId !== row.questionId })) {
+          const framePath = join(directory, `atlas-${String(frameCount).padStart(6, "0")}.jpg`);
+          frameCount += 1;
+          await writeFile(framePath, await atlas.atlasFrame(state));
+          concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+          lastFrame = framePath;
+        }
+        start += row.allocatedDuration;
+        onProgress?.({ phase: "rendering-slides", completed: index + 1, total: rows.length });
+      }
+    } finally {
+      await atlas.close();
+    }
+    console.info("Pedagogy atlas frames", { frames: frameCount, rows: atlasRows });
+  } else if (journeyRows) {
     const chapters = [...new Set(timeline.rows.map((row) => row.journey?.chapter ?? "").filter(Boolean))];
     const journey = await openJourneyRenderer({ executablePath: journeyBrowserPath });
     let frameCount = 0;
@@ -173,7 +199,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     }
     console.info("Pedagogy journey frames", { frames: frameCount, rows: journeyRows });
   }
-  for (const [index, row] of (journeyRows ? [] : timeline.rows).entries()) {
+  for (const [index, row] of (journeyRows || atlasRows ? [] : timeline.rows).entries()) {
     const framePrefix = join(directory, `frame-${String(index).padStart(4, "0")}`);
     try {
       if (row.layout === "passage") {
