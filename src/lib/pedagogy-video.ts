@@ -12,6 +12,11 @@ import { createConceptSlide, conceptSlideFontSize, type ConceptSlideState } from
 import { createDiagramSlide, diagramSlideFontSize, DIAGRAM_ANIMATION_FRAMES, DIAGRAM_FRAME_SECONDS, type DiagramSlideState } from "@/lib/pedagogy-diagram-slide";
 import { probeFinalVideo } from "@/lib/video-qa";
 import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } from "@/lib/pedagogy-transition";
+import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
+import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
+import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps } from "@/lib/pedagogy-solution";
+import { createBoardSlide, createBoardTrickCard, type BoardSlideState } from "@/lib/pedagogy-board-slide";
+import { createSolutionSlide, solutionAnimationFrames, SOLUTION_FRAME_SECONDS, solutionSlideSizes, type SolutionSlideState } from "@/lib/pedagogy-solution-slide";
 
 const exec = promisify(execFile);
 
@@ -65,12 +70,14 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const concatLines: string[] = [];
   let lastFrame = "";
   let crossfades = 0;
+  let trickCards = 0;
   const trickRows = timeline.rows.filter((row) => row.layout === "trick").length;
   const passageRows = timeline.rows.filter((row) => row.layout === "passage").length;
   const diagramRows = timeline.rows.filter((row) => row.layout === "diagram").length;
   const conceptRows = timeline.rows.filter((row) => row.layout === "concept").length;
+  const solutionRows = timeline.rows.filter((row) => row.layout === "solution").length;
   const layouts = new Set(timeline.rows.map((row) => row.layout));
-  console.info("Pedagogy layout", { path: layouts.size === 1 ? [...layouts][0] : "mixed", trickRows, passageRows, diagramRows, conceptRows });
+  console.info("Pedagogy layout", { path: layouts.size === 1 ? [...layouts][0] : "mixed", trickRows, passageRows, diagramRows, conceptRows, solutionRows });
   // One text size per slide type for the whole video: every slide uses the smallest size any slide of that type needs.
   const boardState = (index: number): PedagogySlideState => {
     const row = timeline.rows[index];
@@ -90,9 +97,35 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     const row = timeline.rows[index];
     return { topic: row.effectiveQuestionText.trim() || row.questionId, board: row.effectiveBoard, emphasis: row.emphasis, timeLabel: row.adjustedGeneratedTimeLabel };
   };
+  const solutionState = (index: number): SolutionSlideState => {
+    const row = timeline.rows[index];
+    const previous = timeline.rows[index - 1];
+    const sameQuestion = previous?.layout === "solution" && previous.questionId === row.questionId;
+    // The title's highlighted word stays for the whole question unless a later row names another one.
+    const emphasis = row.emphasis.trim() || timeline.rows.slice(0, index).reverse().find((earlier) => earlier.questionId === row.questionId && earlier.layout === "solution" && earlier.emphasis.trim())?.emphasis || "";
+    return { chapter: row.effectiveQuestionText.trim(), questionId: row.questionId, title: row.effectiveBoard, emphasis, problem: row.effectiveProblem, diagram: parseSolutionDiagram(row.diagram, row.diagramItems), steps: parseSolutionSteps(row.effectiveSteps), shown: row.diagramStep, shownBefore: sameQuestion ? previous.diagramStep : 0, drawn: row.solutionDrawn, drawnBefore: sameQuestion ? Math.min(previous.solutionDrawn, row.solutionDrawn) : 0, timeLabel: row.adjustedGeneratedTimeLabel, options: row.effectiveOptions };
+  };
+  // theme = board: the question solved as working lines on the board (pedagogy-board-slide.ts).
+  const solveBoardState = (index: number): BoardSlideState => {
+    const row = timeline.rows[index];
+    const previous = timeline.rows[index - 1];
+    const sameQuestion = previous?.layout === "solution" && previous.questionId === row.questionId;
+    const emphasis = row.emphasis.trim() || timeline.rows.slice(0, index).reverse().find((earlier) => earlier.questionId === row.questionId && earlier.layout === "solution" && earlier.emphasis.trim())?.emphasis || "";
+    return { chapter: row.effectiveQuestionText.trim(), questionId: row.questionId, title: row.effectiveBoard, emphasis, problem: row.effectiveProblem, diagram: parseSolutionDiagram(row.diagram, row.diagramItems), lines: parseSolutionSteps(row.effectiveSteps, BOARD_MAX_LINES), shown: row.diagramStep, shownBefore: sameQuestion ? previous.diagramStep : 0, drawn: row.solutionDrawn, drawnBefore: sameQuestion ? Math.min(previous.solutionDrawn, row.solutionDrawn) : 0, timeLabel: row.adjustedGeneratedTimeLabel, notes: { trap: row.effectiveTrap, trick: row.effectiveTrick, remember: row.effectiveRemember }, options: row.effectiveOptions };
+  };
+  const boardRows = timeline.rows.filter((row) => row.layout === "solution" && row.effectiveTheme === "board").length;
+  if (boardRows) console.info("Pedagogy solution theme", { path: "board", boardRows });
+  // One problem size and one card size for every solution slide in the video.
+  let solutionSizes: SolutionSlideState["sizes"];
+  for (const [index, row] of timeline.rows.entries()) {
+    if (row.layout !== "solution" || row.effectiveTheme === "board") continue;
+    const sizes = solutionSlideSizes(solutionState(index));
+    solutionSizes = { problem: Math.min(sizes.problem, solutionSizes?.problem ?? Infinity), card: Math.min(sizes.card, solutionSizes?.card ?? Infinity) };
+  }
+  if (solutionSizes) console.info("Pedagogy solution text size", { path: "one-size-per-video", ...solutionSizes });
   const sizeByLayout = new Map<string, number>();
   for (const [index, row] of timeline.rows.entries()) {
-    if (row.layout === "trick") continue;
+    if (row.layout === "trick" || row.layout === "visual" || row.layout === "solution") continue;
     const key = row.layout;
     try {
       const size = row.layout === "passage" ? await passageSlideFontSize(passageState(index))
@@ -105,6 +138,13 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     }
   }
   console.info("Pedagogy text size", { path: "one-size-per-video", sizes: Object.fromEntries(sizeByLayout) });
+  const lookRows = timeline.rows.filter((row) => row.layout === "visual");
+  const logos = await loadPedagogyLogos(lookRows.flatMap((row) => { const visual = parsePedagogyVisual(row.visual, row.visualData); return visual.kind === "logo" ? visual.names : []; }));
+  const missingLogos = [...logos].filter(([, image]) => !image).map(([name]) => name);
+  const pictures = await loadLookPictures(lookRows.flatMap((row) => { const visual = parsePedagogyVisual(row.visual, row.visualData); return visual.kind === "picture" ? [visual.file] : []; }));
+  const missingPictures = [...pictures].filter(([, image]) => !image).map(([file]) => file);
+  if (pictures.size) console.info("Pedagogy look pictures", { pictures: pictures.size - missingPictures.length, path: missingPictures.length ? "missing-picture-placeholder" : "picture-files", missingPictures });
+  if (lookRows.length) console.info("Pedagogy look slides", { rows: lookRows.length, logos: logos.size - missingLogos.length, path: missingLogos.length ? "logo-name-tiles" : "logo-files", missingLogos });
   for (const [index, row] of timeline.rows.entries()) {
     const framePrefix = join(directory, `frame-${String(index).padStart(4, "0")}`);
     try {
@@ -145,6 +185,78 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
           concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
           lastFrame = framePath;
         }
+      } else if (row.layout === "solution" && row.effectiveTheme === "board") {
+        const previous = timeline.rows[index - 1];
+        const state = solveBoardState(index);
+        // Writing is synced to the voice: a new working line is written across the time it is spoken.
+        const newLine = state.shown > state.shownBefore;
+        const newItems = state.drawn - state.drawnBefore;
+        const spoken = narrationDurations[index];
+        const newTopic = Boolean(lastFrame) && Boolean(previous) && previous.questionId !== row.questionId;
+        const cardSeconds = newTopic ? Math.min(1.2, row.allocatedDuration * 0.25) : 0;
+        const fadeSeconds = newTopic ? Math.min(TOPIC_TRANSITION_SECONDS, row.allocatedDuration * 0.2) : 0;
+        const room = row.allocatedDuration - cardSeconds - fadeSeconds - 0.05;
+        const animationSeconds = newLine ? Math.max(0.6, Math.min(spoken * 0.92, room)) : newItems > 0 ? Math.min(1.2, room * 0.6) : 0;
+        const frames = animationSeconds ? Math.min(150, Math.max(8, Math.round(animationSeconds * 12))) : 1;
+        if (newTopic) {
+          const cardPath = `${framePrefix}-card.png`;
+          await writeFile(cardPath, await createBoardTrickCard(state));
+          concatLines.push(`file '${cardPath}'`, `duration ${cardSeconds.toFixed(6)}`);
+          const incoming = await createBoardSlide(state, 0);
+          for (let frame = 1; frame <= TOPIC_TRANSITION_FRAMES; frame += 1) {
+            const framePath = `${framePrefix}-t${String(frame).padStart(2, "0")}.png`;
+            await writeFile(framePath, await crossfadeFrame(cardPath, incoming, frame / (TOPIC_TRANSITION_FRAMES + 1)));
+            concatLines.push(`file '${framePath}'`, `duration ${(fadeSeconds / TOPIC_TRANSITION_FRAMES).toFixed(6)}`);
+          }
+          crossfades += 1;
+          trickCards += 1;
+        }
+        const frameSeconds = animationSeconds ? animationSeconds / frames : 0;
+        for (let frame = 1; frame <= frames; frame += 1) {
+          const framePath = `${framePrefix}-b${String(frame).padStart(3, "0")}.png`;
+          await writeFile(framePath, await createBoardSlide(state, animationSeconds ? frame / frames : 1));
+          const duration = frame === frames ? row.allocatedDuration - cardSeconds - fadeSeconds - animationSeconds + frameSeconds : frameSeconds;
+          concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+          lastFrame = framePath;
+        }
+      } else if (row.layout === "solution") {
+        const previous = timeline.rows[index - 1];
+        // Items named by this row's narration draw in as the line starts; a new step card rises in; else the board holds.
+        const state = { ...solutionState(index), sizes: solutionSizes };
+        const animated = solutionAnimationFrames(state.drawn - state.drawnBefore, state.shown > state.shownBefore);
+        const frames = Math.max(1, animated);
+        const animationSeconds = animated ? Math.min(animated * SOLUTION_FRAME_SECONDS, row.allocatedDuration * 0.6) : 0;
+        const frameSeconds = animated ? animationSeconds / animated : 0;
+        const newTopic = Boolean(lastFrame) && Boolean(previous) && previous.questionId !== row.questionId;
+        const transitionSeconds = newTopic ? Math.min(TOPIC_TRANSITION_SECONDS, row.allocatedDuration * 0.2) : 0;
+        if (newTopic) {
+          const incoming = await createSolutionSlide(state, 0);
+          for (let frame = 1; frame <= TOPIC_TRANSITION_FRAMES; frame += 1) {
+            const framePath = `${framePrefix}-t${String(frame).padStart(2, "0")}.png`;
+            await writeFile(framePath, await crossfadeFrame(lastFrame, incoming, frame / (TOPIC_TRANSITION_FRAMES + 1)));
+            concatLines.push(`file '${framePath}'`, `duration ${(transitionSeconds / TOPIC_TRANSITION_FRAMES).toFixed(6)}`);
+          }
+          crossfades += 1;
+        }
+        for (let frame = 1; frame <= frames; frame += 1) {
+          const framePath = `${framePrefix}-s${String(frame).padStart(2, "0")}.png`;
+          await writeFile(framePath, await createSolutionSlide(state, frame / frames));
+          const duration = frame === frames ? row.allocatedDuration - animationSeconds - transitionSeconds + frameSeconds : frameSeconds;
+          concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+          lastFrame = framePath;
+        }
+      } else if (row.layout === "visual") {
+        const previous = timeline.rows[index - 1];
+        const visual = parsePedagogyVisual(row.visual, row.visualData);
+        const holds = visual.kind !== "text" && previous?.layout === "visual" && previous.visual === row.visual && previous.visualData === row.visualData && previous.questionId === row.questionId;
+        const look = { questionId: row.questionId, title: visual.kind === "text" ? "" : row.board, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, visual, logos, pictures };
+        const frames = holds ? [{ png: await createLookSlide(look, 1), duration: row.allocatedDuration }] : await createLookFrames(look, row.allocatedDuration);
+        for (const [frame, { png, duration }] of frames.entries()) {
+          const framePath = `${framePrefix}-v${String(frame).padStart(3, "0")}.png`;
+          await writeFile(framePath, png);
+          concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+          lastFrame = framePath;
+        }
       } else if (row.layout === "trick") {
         const previous = timeline.rows[index - 1];
         const state = {
@@ -177,7 +289,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     }
     onProgress?.({ phase: "rendering-slides", completed: index + 1, total: rows.length });
   }
-  console.info("Pedagogy topic transitions", { path: crossfades ? "crossfade" : "cut", crossfades });
+  console.info("Pedagogy topic transitions", { path: crossfades ? "crossfade" : "cut", crossfades, trickCards });
   concatLines.push(`file '${lastFrame}'`);
   const concatPath = join(directory, "timeline.txt");
   await writeFile(concatPath, concatLines.join("\n"));

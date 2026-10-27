@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { pedagogyBackdrop } from "@/lib/pedagogy-backdrop";
 
 /**
  * "Passage" layout for reading-comprehension lessons: the whole passage stays on
@@ -158,7 +159,7 @@ export async function createPassageSlideSvg(state: PassageSlideState) {
   }).join("");
 
   return `<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1920" height="1080" fill="#0e1424"/>
+    ${pedagogyBackdrop("#0e1424")}
     <rect x="0" y="0" width="1920" height="10" fill="#ffd166"/>
     <text x="80" y="100" font-family="Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="5" fill="#9fb3d1">${escapeXml(state.title.toUpperCase())}</text>
     <text x="1840" y="100" text-anchor="end" font-family="Arial, sans-serif" font-size="25" font-weight="800" letter-spacing="3" fill="#ffd166">${escapeXml(state.timeLabel)}</text>
@@ -167,7 +168,7 @@ export async function createPassageSlideSvg(state: PassageSlideState) {
     <text x="${PASSAGE_BOX.x + PASSAGE_BOX.padding}" y="${PASSAGE_BOX.y + 52}" font-family="Arial, sans-serif" font-size="22" font-weight="800" letter-spacing="4" fill="#4fd1c5">PASSAGE</text>
     ${marks.join("")}
     ${text.join("")}
-    <rect x="${NOTE_BOX.x}" y="${NOTE_BOX.y}" width="${NOTE_BOX.width}" height="${NOTE_BOX.height}" rx="24" fill="#16203a" stroke="#ffd166" stroke-width="3"/>
+    <rect x="${NOTE_BOX.x}" y="${NOTE_BOX.y}" width="${NOTE_BOX.width}" height="${NOTE_BOX.height}" rx="24" fill="#16203a" fill-opacity="0.85" stroke="#ffd166" stroke-width="3"/>
     <text x="${NOTE_BOX.x + NOTE_BOX.padding}" y="${NOTE_BOX.y + 64}" font-family="Arial, sans-serif" font-size="22" font-weight="800" letter-spacing="4" fill="#ffd166">MEANING</text>
     ${noteText}
   </svg>`;

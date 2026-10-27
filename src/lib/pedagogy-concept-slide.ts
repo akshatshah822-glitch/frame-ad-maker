@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 import { phraseRanges } from "@/lib/pedagogy-passage-slide";
+import { pedagogyBackdrop } from "@/lib/pedagogy-backdrop";
 
 /**
  * "Concept" layout for teaching a topic (not solving a question): the topic name on top and
@@ -102,7 +103,7 @@ export async function createConceptSlideSvg(state: ConceptSlideState) {
     text.push(`<text xml:space="preserve" x="${x}" y="${y}" font-family="${SERIF}" font-size="${layout.size}" fill="#eef1f7">${spans.join("")}</text>`);
   }
   return `<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1920" height="1080" fill="#0e1424"/><rect width="1920" height="10" fill="#ffd166"/>
+    ${pedagogyBackdrop("#0e1424")}<rect width="1920" height="10" fill="#ffd166"/>
     <text x="120" y="100" font-family="Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="5" fill="#9fb3d1">TOPIC</text>
     <text x="1800" y="100" text-anchor="end" font-family="Arial, sans-serif" font-size="25" font-weight="800" letter-spacing="3" fill="#ffd166">${escapeXml(state.timeLabel)}</text>
     <text x="120" y="180" font-family="${SERIF}" font-size="54" fill="#ffd166">${escapeXml(state.topic)}</text>
