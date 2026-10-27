@@ -1,3 +1,4 @@
+import { journeyToColumns, type JourneySpec } from "@/lib/pedagogy-journey-spec";
 import { NextResponse } from "next/server";
 import { methodNotAllowed, withJsonErrors } from "@/lib/api-response";
 import { PedagogyBriefValidationError, validatePedagogyRows, type PedagogyBriefInputRow } from "@/lib/pedagogy-brief";
@@ -34,6 +35,9 @@ function suppliedRows(value: unknown): PedagogyBriefInputRow[] {
       visual: row.visual, visualData: row.visualData,
       // layout = solution: the reviewed row carries its effective problem, steps and drawn count; send them back as
       // the sheet columns so the render sees exactly what the review checked.
+      // gs_theme = journey: the reviewed camera, labels, effects and caption go back as the sheet columns too.
+      gsTheme: row.gsTheme,
+      ...(row.journey && typeof row.journey === "object" ? journeyToColumns(row.journey as JourneySpec) : {}),
       ...(row.layout === "solution" ? { problem: row.effectiveProblem, steps: row.effectiveSteps, draw: row.solutionDrawn, theme: row.effectiveTheme, trap: row.effectiveTrap, trick: row.effectiveTrick, remember: row.effectiveRemember } : {}),
     };
   });

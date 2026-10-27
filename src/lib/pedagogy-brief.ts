@@ -2,6 +2,7 @@ import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 import { diagramNames, diagramStepCount } from "@/lib/pedagogy-diagram-slide";
 import { parsePedagogyVisual, pedagogyVisualLabels, PedagogyVisualParseError } from "@/lib/pedagogy-visual";
 import { INFOGRAPHIC_KINDS, INFOGRAPHIC_MAX_ITEMS, infographicItems, isInfographic } from "@/lib/pedagogy-infographic";
+import { JOURNEY_DEFAULT_CAMERA, JourneyParseError, parseGsTheme, parseJourneyCamera, parseJourneyEffects, parseJourneyLabels, type JourneyCamera, type JourneyEffect, type JourneyPin, type JourneySpec } from "@/lib/pedagogy-journey-spec";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, SOLUTION_MAX_CARDS, solutionItems, SolutionParseError } from "@/lib/pedagogy-solution";
 export const pedagogyRequiredColumns = ["question_id", "line_no", "time", "sir_ka_vaakya", "board"] as const;
 
@@ -54,6 +55,21 @@ export type PedagogyBriefInputRow = {
   trap?: unknown;
   trick?: unknown;
   remember?: unknown;
+  /** Optional, whole sheet: "journey" = one continuous 3D Earth (pedagogy-journey.ts); "cinematic" = saved prototype,
+   * not drawn yet (today's look is used and the fallback is logged). Carries forward; blank = today's look. */
+  gsTheme?: unknown;
+  /** Optional, journey only: "lat, lon, distance, tilt". Carries forward until a row names a new view. */
+  camera?: unknown;
+  /** Optional, journey only: "lat, lon = text = colour | …" pinned labels. Carry forward within a question_id. */
+  anchoredLabels?: unknown;
+  /** Optional, journey only: "glow …| arc … > …| band …| equator | sink …| ring …". Carry forward within a question_id. */
+  effects?: unknown;
+  /** Optional, journey only: the educator's own words for the caption bar and where they are in his class. Carry forward within a question_id. */
+  caption?: unknown;
+  sourceTs?: unknown;
+  /** Optional, journey only: header badge (e.g. NEW CONCEPT) and progress-bar chapter. Carry forward through the sheet. */
+  badge?: unknown;
+  chapter?: unknown;
 };
 
 export type PedagogyArc = { from: number; to: number; below: boolean };
@@ -87,6 +103,9 @@ export type PedagogyRow = {
   effectiveTrap: string;
   effectiveTrick: string;
   effectiveRemember: string;
+  /** gs_theme in force; journey is the spec for this row when gs_theme = journey (null otherwise). */
+  gsTheme: "" | "journey" | "cinematic";
+  journey: JourneySpec | null;
   /** FRAME look visual for layout = visual ("" on other rows). */
   visual: string;
   visualData: string;
@@ -270,6 +289,14 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       trapText: valueAsText(input.trap).trim(),
       trickText: valueAsText(input.trick).trim(),
       rememberText: valueAsText(input.remember).trim(),
+      gsThemeText: valueAsText(input.gsTheme).trim(),
+      cameraText: valueAsText(input.camera).trim(),
+      labelsText: valueAsText(input.anchoredLabels).trim(),
+      effectsText: valueAsText(input.effects).trim(),
+      captionText: valueAsText(input.caption).trim(),
+      sourceTsText: valueAsText(input.sourceTs).trim(),
+      badgeText: valueAsText(input.badge).trim(),
+      chapterText: valueAsText(input.chapter).trim(),
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
@@ -289,6 +316,14 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedDrawn = -1;
   let retainedTheme: "classic" | "board" = "classic";
   let retainedNotes = { trap: "", trick: "", remember: "" };
+  let retainedGsTheme: "" | "journey" | "cinematic" = "";
+  let retainedCamera: JourneyCamera = JOURNEY_DEFAULT_CAMERA;
+  let retainedPins: JourneyPin[] = [];
+  let retainedCardLines: string[] = [];
+  let retainedEffects: JourneyEffect[] = [];
+  let retainedCaption = { caption: "", sourceTs: "" };
+  let retainedBadge = "";
+  let retainedChapter = "";
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row, index) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -318,7 +353,23 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       retainedSteps = "";
       retainedDrawn = -1;
       retainedNotes = { trap: "", trick: "", remember: "" };
+      retainedPins = [];
+      retainedCardLines = [];
+      retainedEffects = [];
+      retainedCaption = { caption: "", sourceTs: "" };
     }
+    try {
+      if (row.gsThemeText) retainedGsTheme = parseGsTheme(row.gsThemeText);
+      if (row.cameraText) retainedCamera = parseJourneyCamera(row.cameraText);
+      if (row.labelsText) ({ pins: retainedPins, cardLines: retainedCardLines } = parseJourneyLabels(row.labelsText));
+      if (row.effectsText) retainedEffects = parseJourneyEffects(row.effectsText);
+    } catch (error) {
+      if (error instanceof JourneyParseError) throw rowError(row.sourceRow, error.message);
+      throw error;
+    }
+    if (row.captionText || row.sourceTsText) retainedCaption = { caption: row.captionText, sourceTs: row.sourceTsText };
+    if (row.badgeText) retainedBadge = row.badgeText;
+    if (row.chapterText) retainedChapter = row.chapterText;
     let diagram = "";
     let diagramStep = 0;
     if (row.layout === "diagram") {
@@ -392,8 +443,12 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       effectiveSteps = retainedSteps;
     }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, trapText, trickText, rememberText, ...rest } = row;
+    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, trapText, trickText, rememberText, gsThemeText, cameraText, labelsText, effectsText, captionText, sourceTsText, badgeText, chapterText, ...rest } = row;
     void themeText; void trapText; void trickText; void rememberText;
+    void gsThemeText; void cameraText; void labelsText; void effectsText; void captionText; void sourceTsText; void badgeText; void chapterText;
+    const journey: JourneySpec | null = retainedGsTheme === "journey"
+      ? { camera: retainedCamera, pins: retainedPins, cardLines: retainedCardLines, effects: retainedEffects, caption: retainedCaption.caption, sourceTs: retainedCaption.sourceTs, badge: retainedBadge, chapter: retainedChapter }
+      : null;
     const solution = row.layout === "solution";
     void drawText;
     void problemText;
@@ -404,12 +459,14 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     void diagramItemsText;
     const diagramItems = (row.layout === "diagram" && isInfographic(diagram)) || row.layout === "solution" ? retainedDiagramItems : [];
     const diagramLabels = row.layout === "diagram" ? retainedDiagramLabels : "hi";
-    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveProblem, effectiveSteps, solutionDrawn, effectiveTheme: retainedTheme, effectiveTrap: solution ? retainedNotes.trap : "", effectiveTrick: solution ? retainedNotes.trick : "", effectiveRemember: solution ? retainedNotes.remember : "", effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveProblem, effectiveSteps, solutionDrawn, effectiveTheme: retainedTheme, effectiveTrap: solution ? retainedNotes.trap : "", effectiveTrick: solution ? retainedNotes.trick : "", effectiveRemember: solution ? retainedNotes.remember : "", gsTheme: retainedGsTheme, journey, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 
 export function pedagogyWarnings(rows: PedagogyRow[]) {
-  return rows.flatMap((row) => row.layout === "visual" ? lookVisualWarnings(row) : row.layout === "passage"
+  const cinematic = rows.find((row) => row.gsTheme === "cinematic");
+  const typeWarnings = cinematic ? [`Row ${cinematic.sourceRow}: gs_theme "cinematic" is a saved prototype that FRAME does not draw yet; this video uses today's look.`] : [];
+  return [...typeWarnings, ...rows.flatMap((row) => row.layout === "visual" ? lookVisualWarnings(row) : row.layout === "passage"
     ? (row.emphasis.trim() && !row.effectiveQuestionText.toLowerCase().includes(row.emphasis.trim().toLowerCase())
       ? [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not appear in the passage; no highlight was added.`]
       : [])
@@ -417,7 +474,7 @@ export function pedagogyWarnings(rows: PedagogyRow[]) {
     ? emphasisPhrases(row.emphasis).filter((phrase) => !row.effectiveBoard.includes(phrase)).map((phrase) => `Row ${row.sourceRow}: emphasis ${JSON.stringify(phrase)} does not exist on the current board; no highlight was added.`)
     : row.emphasis.trim() && !row.effectiveBoard.includes(row.emphasis)
     ? [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not exist on the current board; no highlight was added.`]
-    : []);
+    : [])];
 }
 
 export const PACKED_NARRATION_GAP_SECONDS = 0.25;

@@ -43,5 +43,13 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     trap: row.trap,
     trick: row.trick,
     remember: row.remember,
+    gsTheme: row.gs_theme,
+    camera: row.camera,
+    anchoredLabels: row.anchored_labels,
+    effects: row.effects,
+    caption: row.caption,
+    sourceTs: row.source_ts,
+    badge: row.badge,
+    chapter: row.chapter,
   } satisfies PedagogyBriefInputRow));
 }

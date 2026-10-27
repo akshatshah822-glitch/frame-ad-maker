@@ -23,9 +23,11 @@
     "openai": "^7.8.0",
     "opentype.js": "^2.0.0",
     "pdf-lib": "^1.17.1",
+    "playwright-core": "1.62.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sharp": "^0.35.4",
+    "three": "0.169.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -35,6 +37,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "0.169.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.3",
     "tailwindcss": "^4",
