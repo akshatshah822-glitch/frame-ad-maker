@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 import { infographicElements, isInfographic } from "@/lib/pedagogy-infographic";
+import { pedagogyBackdrop } from "@/lib/pedagogy-backdrop";
 
 /**
  * "Diagram" layout: a board diagram that builds step by step while the teacher explains,
@@ -265,12 +266,12 @@ export async function createDiagramSlideSvg(state: DiagramSlideState, progress =
     return `<text xml:space="preserve" x="${NOTES.x + NOTES.padding}" y="${NOTES.y + 130 + index * notes.lineHeight}" font-family="${SANS}" font-size="${notes.size}" fill="${base}">${spans.join("")}</text>`;
   }).join("");
   return `<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1920" height="1080" fill="#101a30"/><rect width="1920" height="10" fill="${MISSING}"/>
+    ${pedagogyBackdrop("#101a30", "#ff8a7a")}<rect width="1920" height="10" fill="${MISSING}"/>
     <text x="80" y="80" font-family="${SANS}" font-size="34" fill="#ffd166">${escapeXml(state.title)}</text>
     <text x="1840" y="80" text-anchor="end" font-family="${LABEL}" font-size="24" font-weight="800" fill="${MISSING}">${escapeXml(state.timeLabel)}</text>
-    <rect x="${BOARD.x}" y="${BOARD.y}" width="${BOARD.width}" height="${BOARD.height}" rx="22" fill="#16213d" stroke="#33415c" stroke-width="2"/>
+    <rect x="${BOARD.x}" y="${BOARD.y}" width="${BOARD.width}" height="${BOARD.height}" rx="22" fill="#16213d" fill-opacity="0.55" stroke="#33415c" stroke-width="2"/>
     ${drawn}
-    <rect x="${NOTES.x}" y="${NOTES.y}" width="${NOTES.width}" height="${NOTES.height}" rx="22" fill="#16213d" stroke="${MISSING}" stroke-width="3"/>
+    <rect x="${NOTES.x}" y="${NOTES.y}" width="${NOTES.width}" height="${NOTES.height}" rx="22" fill="#16213d" fill-opacity="0.7" stroke="${MISSING}" stroke-width="3"/>
     <text x="${NOTES.x + NOTES.padding}" y="${NOTES.y + 60}" font-family="${LABEL}" font-size="22" font-weight="800" letter-spacing="4" fill="${MISSING}">NOTES</text>
     ${noteText}
   </svg>`;

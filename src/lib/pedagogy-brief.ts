@@ -1,6 +1,8 @@
 import { emphasisPhrases } from "@/lib/pedagogy-emphasis";
 import { diagramNames, diagramStepCount } from "@/lib/pedagogy-diagram-slide";
+import { parsePedagogyVisual, pedagogyVisualLabels, PedagogyVisualParseError } from "@/lib/pedagogy-visual";
 import { INFOGRAPHIC_KINDS, INFOGRAPHIC_MAX_ITEMS, infographicItems, isInfographic } from "@/lib/pedagogy-infographic";
+import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, SOLUTION_MAX_CARDS, solutionItems, SolutionParseError } from "@/lib/pedagogy-solution";
 export const pedagogyRequiredColumns = ["question_id", "line_no", "time", "sir_ka_vaakya", "board"] as const;
 
 export type PedagogyBriefInputRow = {
@@ -34,6 +36,24 @@ export type PedagogyBriefInputRow = {
   diagramLabels?: unknown;
   /** Optional, infographic diagrams only (flow, cards, timeline, compare): items separated by "|". Carries forward within a question. */
   diagramItems?: unknown;
+  /** Optional, layout = visual only: text, counter, logo, cards, flowchart, bar, line or waterfall. */
+  visual?: unknown;
+  /** Optional, layout = visual only: the items for that visual, e.g. "Free SIM > First use" or "2016: 250 | 2018: 10". */
+  visualData?: unknown;
+  /** Optional, layout = solution only: the problem students read. Carries forward within a question_id. */
+  problem?: unknown;
+  /** Optional, layout = solution only: step cards "a | b | Answer: c". Carries forward within a question_id. */
+  steps?: unknown;
+  /** Optional, layout = solution only: how many diagram_items are drawn by this row. Blank = row before (first row: all). */
+  draw?: unknown;
+  /** Optional, layout = solution only: "classic" (step cards, the look before Oct 23) or "board" (the solution written
+   * line by line on the board in a handwriting font). Blank = the row before; a sheet without the column is classic. */
+  theme?: unknown;
+  /** Optional, theme = board only: margin notes "N | text" (N = working line the arrow points at) or "text".
+   * Carry forward within a question_id. */
+  trap?: unknown;
+  trick?: unknown;
+  remember?: unknown;
 };
 
 export type PedagogyArc = { from: number; to: number; below: boolean };
@@ -55,7 +75,21 @@ export type PedagogyRow = {
   options: [string, string, string, string, string];
   effectiveQuestionText: string;
   effectiveOptions: [string, string, string, string, string];
-  layout: "board" | "trick" | "passage" | "diagram" | "concept";
+  layout: "board" | "trick" | "passage" | "diagram" | "concept" | "visual" | "solution";
+  /** layout = solution: the problem and step cards in force on this row ("" on other rows). diagram, diagramItems
+   * and diagramStep hold the solution diagram, its items and how many step cards are showing. */
+  effectiveProblem: string;
+  effectiveSteps: string;
+  /** layout = solution: diagram items drawn by this row (0 on other rows). */
+  solutionDrawn: number;
+  /** layout = solution: theme in force and the margin notes of this question ("" when none). */
+  effectiveTheme: "classic" | "board";
+  effectiveTrap: string;
+  effectiveTrick: string;
+  effectiveRemember: string;
+  /** FRAME look visual for layout = visual ("" on other rows). */
+  visual: string;
+  visualData: string;
   /** Diagram name and step; "" and 0 on rows that are not diagram rows. */
   diagram: string;
   diagramStep: number;
@@ -150,14 +184,37 @@ function parsePause(value: unknown, sourceRow: number): "haan" | "nahi" {
   throw rowError(sourceRow, 'pause_after must be "haan", "nahi", or blank.');
 }
 
-function parseLayout(value: unknown, sourceRow: number): "board" | "trick" | "passage" | "diagram" | "concept" {
+function parseLookVisual(layout: unknown, kind: unknown, data: unknown, board: unknown, sourceRow: number) {
+  if (valueAsText(layout).trim().toLowerCase() !== "visual") return { visual: "", visualData: "" };
+  try {
+    const visual = parsePedagogyVisual(kind, data);
+    if (visual.kind !== "text" && valueAsText(board).trim().length > 110) throw rowError(sourceRow, "board is the title above a visual and must be 110 characters or fewer.");
+    return { visual: visual.kind, visualData: visual.kind === "text" ? "" : valueAsText(data).trim() };
+  } catch (error) {
+    if (error instanceof PedagogyVisualParseError) throw rowError(sourceRow, error.message);
+    throw error;
+  }
+}
+
+function lookVisualWarnings(row: PedagogyRow) {
+  if (!row.emphasis.trim()) return [];
+  const visual = parsePedagogyVisual(row.visual, row.visualData);
+  const found = visual.kind === "text"
+    ? row.effectiveBoard.includes(row.emphasis)
+    : row.board.includes(row.emphasis) || pedagogyVisualLabels(visual).some((label) => label.trim() === row.emphasis.trim());
+  return found ? [] : [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not exist on the current board; no highlight was added.`];
+}
+
+function parseLayout(value: unknown, sourceRow: number): "board" | "trick" | "passage" | "diagram" | "concept" | "visual" | "solution" {
   const text = valueAsText(value).trim().toLowerCase();
   if (!text || text === "board") return "board";
   if (text === "trick") return "trick";
   if (text === "passage") return "passage";
   if (text === "diagram") return "diagram";
   if (text === "concept") return "concept";
-  throw rowError(sourceRow, 'layout must be "trick", "passage", "diagram", "concept", "board", or blank.');
+  if (text === "visual") return "visual";
+  if (text === "solution") return "solution";
+  throw rowError(sourceRow, 'layout must be "trick", "passage", "diagram", "concept", "visual", "solution", "board", or blank.');
 }
 
 /** Non-space characters of the working row; arc indexes count these, starting at 0. */
@@ -198,6 +255,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       questionText: valueAsText(input.questionText),
       options: [valueAsText(input.optionA), valueAsText(input.optionB), valueAsText(input.optionC), valueAsText(input.optionD), valueAsText(input.optionE)] as [string, string, string, string, string],
       layout: parseLayout(input.layout, sourceRow),
+      ...parseLookVisual(input.layout, input.visual, input.visualData, input.board, sourceRow),
       working: valueAsText(input.working),
       arcs: valueAsText(input.arcs).trim(),
       result: valueAsText(input.result),
@@ -205,6 +263,13 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       diagramStepText: valueAsText(input.diagramStep).trim(),
       diagramLabelsText: valueAsText(input.diagramLabels).trim().toLowerCase(),
       diagramItemsText: valueAsText(input.diagramItems).trim(),
+      problemText: valueAsText(input.problem).trim(),
+      stepsText: valueAsText(input.steps).trim(),
+      drawText: valueAsText(input.draw).trim(),
+      themeText: valueAsText(input.theme).trim().toLowerCase(),
+      trapText: valueAsText(input.trap).trim(),
+      trickText: valueAsText(input.trick).trim(),
+      rememberText: valueAsText(input.remember).trim(),
     };
   }).toSorted((left, right) => left.lineNo - right.lineNo);
 
@@ -219,6 +284,11 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedDiagramStep = 0;
   let retainedDiagramLabels: "hi" | "en" = "hi";
   let retainedDiagramItems: string[] = [];
+  let retainedProblem = "";
+  let retainedSteps = "";
+  let retainedDrawn = -1;
+  let retainedTheme: "classic" | "board" = "classic";
+  let retainedNotes = { trap: "", trick: "", remember: "" };
   const firstTimestamp = rows[0].sourceSeconds;
   return rows.map((row, index) => {
     if (row.lineNo === previousLineNo) throw rowError(row.sourceRow, `duplicate line_no ${row.lineNo}.`);
@@ -244,6 +314,10 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       retainedDiagramStep = 0;
       retainedDiagramLabels = "hi";
       retainedDiagramItems = [];
+      retainedProblem = "";
+      retainedSteps = "";
+      retainedDrawn = -1;
+      retainedNotes = { trap: "", trick: "", remember: "" };
     }
     let diagram = "";
     let diagramStep = 0;
@@ -271,20 +345,71 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       diagram = retainedDiagram;
       diagramStep = retainedDiagramStep;
     }
+    let effectiveProblem = "";
+    let effectiveSteps = "";
+    let solutionDrawn = 0;
+    if (row.themeText) {
+      if (row.themeText !== "classic" && row.themeText !== "board") throw rowError(row.sourceRow, 'theme must be "classic", "board", or blank.');
+      retainedTheme = row.themeText;
+    }
+    if (row.trapText) retainedNotes.trap = row.trapText;
+    if (row.trickText) retainedNotes.trick = row.trickText;
+    if (row.rememberText) retainedNotes.remember = row.rememberText;
+    if (row.layout === "solution") {
+      // Same carry-forward as diagram rows; diagram_step counts the step cards showing (0 = none yet).
+      if (row.diagramName && row.diagramName !== retainedDiagram) { retainedDiagramItems = []; }
+      if (row.diagramName) retainedDiagram = row.diagramName;
+      if (row.diagramItemsText) retainedDiagramItems = solutionItems(row.diagramItemsText);
+      if (row.problemText) retainedProblem = row.problemText;
+      if (row.stepsText) retainedSteps = row.stepsText;
+      if (!retainedDiagram) retainedDiagram = "none";
+      try {
+        const parts = parseSolutionDiagram(retainedDiagram, retainedDiagramItems).parts;
+        if (row.drawText) {
+          const drawn = Number(row.drawText);
+          if (!Number.isInteger(drawn) || drawn < 0 || drawn > parts) throw rowError(row.sourceRow, `draw must be a whole number from 0 to ${parts} (how many diagram_items are drawn by this row).`);
+          retainedDrawn = drawn;
+        } else retainedDrawn = retainedDrawn < 0 ? parts : Math.min(retainedDrawn, parts);
+        solutionDrawn = retainedDrawn;
+        const cards = parseSolutionSteps(retainedSteps, retainedTheme === "board" ? BOARD_MAX_LINES : SOLUTION_MAX_CARDS).length;
+        // Margin notes point at a working line: "N | text" needs 1 ≤ N ≤ the number of lines.
+        for (const [name, note] of Object.entries(retainedNotes)) {
+          const target = /^(\d+)\s*\|/.exec(note)?.[1];
+          if (target && (Number(target) < 1 || Number(target) > cards)) throw rowError(row.sourceRow, `${name} points at line ${target}, but steps has ${cards} line${cards === 1 ? "" : "s"}.`);
+        }
+        if (row.diagramStepText) {
+          const shown = Number(row.diagramStepText);
+          if (!Number.isInteger(shown) || shown < 0 || shown > cards) throw rowError(row.sourceRow, `diagram_step must be a whole number from 0 to ${cards} (the number of step cards showing).`);
+          retainedDiagramStep = shown;
+        } else retainedDiagramStep = Math.min(retainedDiagramStep, cards);
+      } catch (error) {
+        if (error instanceof SolutionParseError) throw rowError(row.sourceRow, error.message);
+        throw error;
+      }
+      diagram = retainedDiagram;
+      diagramStep = retainedDiagramStep;
+      effectiveProblem = retainedProblem;
+      effectiveSteps = retainedSteps;
+    }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, ...rest } = row;
+    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, trapText, trickText, rememberText, ...rest } = row;
+    void themeText; void trapText; void trickText; void rememberText;
+    const solution = row.layout === "solution";
+    void drawText;
+    void problemText;
+    void stepsText;
     void diagramName;
     void diagramStepText;
     void diagramLabelsText;
     void diagramItemsText;
-    const diagramItems = row.layout === "diagram" && isInfographic(diagram) ? retainedDiagramItems : [];
+    const diagramItems = (row.layout === "diagram" && isInfographic(diagram)) || row.layout === "solution" ? retainedDiagramItems : [];
     const diagramLabels = row.layout === "diagram" ? retainedDiagramLabels : "hi";
-    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveProblem, effectiveSteps, solutionDrawn, effectiveTheme: retainedTheme, effectiveTrap: solution ? retainedNotes.trap : "", effectiveTrick: solution ? retainedNotes.trick : "", effectiveRemember: solution ? retainedNotes.remember : "", effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 
 export function pedagogyWarnings(rows: PedagogyRow[]) {
-  return rows.flatMap((row) => row.layout === "passage"
+  return rows.flatMap((row) => row.layout === "visual" ? lookVisualWarnings(row) : row.layout === "passage"
     ? (row.emphasis.trim() && !row.effectiveQuestionText.toLowerCase().includes(row.emphasis.trim().toLowerCase())
       ? [`Row ${row.sourceRow}: emphasis ${JSON.stringify(row.emphasis)} does not appear in the passage; no highlight was added.`]
       : [])

@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { pedagogyBackdrop } from "@/lib/pedagogy-backdrop";
 
 export type PedagogySlideState = {
   questionId: string;
@@ -148,7 +149,7 @@ async function createStripSlideSvg(state: PedagogySlideState) {
   const firstSolutionLineY = 470 + Math.max(0, (STRIP_BOARD_TEXT_HEIGHT - solution.lines.length * solution.lineHeight) / 2) + solution.lineHeight;
   const solutionText = solution.lines.map((line, index) => textLine(line, 230, firstSolutionLineY + index * solution.lineHeight, solution.size)).join("");
   return `<svg width="1920" height="1080" xmlns="http://www.w3.org/2000/svg">
-      <rect width="1920" height="1080" fill="#101b36"/>
+      ${pedagogyBackdrop("#101b36", "#ff5c46")}
       <rect x="0" y="0" width="1920" height="20" fill="#ff5c46"/>
       <text x="180" y="96" font-family="Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="5" fill="#bfc9dc">EXAM EXPLAINER</text>
       <text x="1740" y="96" text-anchor="end" font-family="Arial, sans-serif" font-size="25" font-weight="800" letter-spacing="3" fill="#ff5c46">${escapeXml(state.generatedTimeLabel)}</text>
@@ -218,7 +219,7 @@ export async function createPedagogySlideSvg(state: PedagogySlideState) {
     const firstSolutionLineY = 610 + Math.max(0, (280 - solution.lines.length * solution.lineHeight) / 2) + solution.lineHeight;
     const solutionText = solution.lines.map((line, index) => textLine(line, 230, firstSolutionLineY + index * solution.lineHeight, solution.size)).join("");
     return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <rect width="1920" height="1080" fill="#101b36"/>
+      ${pedagogyBackdrop("#101b36", "#ff5c46")}
       <rect x="0" y="0" width="1920" height="20" fill="#ff5c46"/>
       <text x="180" y="106" font-family="Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="5" fill="#bfc9dc">EXAM EXPLAINER</text>
       <text x="1740" y="106" text-anchor="end" font-family="Arial, sans-serif" font-size="25" font-weight="800" letter-spacing="3" fill="#ff5c46">${escapeXml(state.generatedTimeLabel)}</text>
@@ -235,7 +236,7 @@ export async function createPedagogySlideSvg(state: PedagogySlideState) {
   const firstLineY = 290 + Math.max(0, (650 - layout.lines.length * layout.lineHeight) / 2) + layout.lineHeight;
   const boardText = layout.lines.map((line, index) => textLine(line, 230, firstLineY + index * layout.lineHeight, layout.size)).join("");
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1920" height="1080" fill="#101b36"/>
+    ${pedagogyBackdrop("#101b36", "#ff5c46")}
     <rect x="0" y="0" width="1920" height="20" fill="#ff5c46"/>
     <rect x="120" y="160" width="1680" height="760" rx="28" fill="#17233e" stroke="#52617f" stroke-width="3"/>
     <text x="180" y="106" font-family="Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="5" fill="#bfc9dc">EXAM EXPLAINER</text>

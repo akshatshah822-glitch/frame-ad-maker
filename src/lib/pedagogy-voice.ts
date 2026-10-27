@@ -9,7 +9,7 @@ export const PEDAGOGY_VOICE_INSTRUCTIONS = [
   "You are a warm, energetic Indian maths teacher explaining an SSC exam question to students in a live class.",
   "The text is Hinglish written in Devanagari: Hindi words mixed with everyday English classroom words (ratio, total, amount, divide, part, number) spelled in Devanagari.",
   "Pronounce Hindi words with natural Hindi pronunciation, and the English classroom words exactly as Indian teachers say them in class.",
-  "Read numbers naturally, as spoken in a Hindi-medium maths class.",
+  "Numbers are written as English words; say them in English exactly as written, never in Hindi.",
   "Sound conversational and encouraging. Stress the key numbers and warning words such as रुको and याद रखो.",
   "Begin immediately. Do not add, remove, translate, or paraphrase any words.",
 ].join(" ");
@@ -58,8 +58,35 @@ export function resolvePedagogyVoice(env: Record<string, string | undefined> = p
 }
 
 export const EDUCATOR_VOICE_MODEL = "eleven_multilingual_v2";
-/** Educator narration pace (ElevenLabs allows 0.7 to 1.2; 1 = normal). Slowed for students: 1.0 sounded fast. */
+/** Educator narration pace (ElevenLabs allows 0.7 to 1.2; 1 = normal). Used only for Gujarati lines (eleven_v3). */
 export const EDUCATOR_VOICE_SPEED = 0.9;
+/** Hindi/English lines are sent without voice_settings, so ElevenLabs uses the settings saved on the voice itself and
+ * the video sounds exactly like the voice as the educator made it (Akshat, 23 Oct 2026: "the voice is a bit changed"). */
+export const EDUCATOR_VOICE_SETTINGS = "voice-saved-settings-pinned-v2";
+/** Same seed on every line, so one video's lines come out of ElevenLabs with one delivery (Akshat, 23 Oct: the voice
+ * changed after about 25 s because each line was a fresh, independent request). */
+export const EDUCATOR_VOICE_SEED = 20261023;
+type SavedVoiceSettings = { stability?: number; similarity_boost?: number; style?: number; use_speaker_boost?: boolean; speed?: number };
+const savedSettings = new Map<string, Promise<SavedVoiceSettings | null>>();
+/** The settings saved on the voice in ElevenLabs, read once per voice and then sent explicitly on every line. */
+export function loadSavedVoiceSettings(voiceId: string, fetchImpl: typeof fetch = fetch) {
+  let entry = savedSettings.get(voiceId);
+  if (!entry) {
+    entry = fetchImpl(`https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voiceId)}/settings`, { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY ?? "" } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const value = await response.json() as SavedVoiceSettings;
+        console.info("Pedagogy educator voice settings", { path: "saved-settings-pinned", stability: value.stability, similarity_boost: value.similarity_boost, style: value.style, speed: value.speed });
+        return value;
+      })
+      .catch((error) => {
+        console.warn("Pedagogy educator voice settings", { path: "saved-settings-unavailable-voice-default", reason: error instanceof Error ? error.message : String(error) });
+        return null;
+      });
+    savedSettings.set(voiceId, entry);
+  }
+  return entry;
+}
 /** eleven_multilingual_v2 cannot speak Gujarati; eleven_v3 can (ElevenLabs language list). */
 export const EDUCATOR_GUJARATI_VOICE_MODEL = "eleven_v3";
 const GUJARATI_SCRIPT = /[\u0A80-\u0AFF]/;
@@ -70,7 +97,7 @@ export function educatorVoiceModel(script: string) {
   return GUJARATI_SCRIPT.test(script) ? EDUCATOR_GUJARATI_VOICE_MODEL : EDUCATOR_VOICE_MODEL;
 }
 
-export function buildEducatorSpeechRequest(script: string, voiceId: string) {
+export function buildEducatorSpeechRequest(script: string, voiceId: string, context: { previousText?: string; nextText?: string; settings?: SavedVoiceSettings | null } = {}) {
   const text = script.trim();
   if (!text) throw new Error("Pedagogy narration is blank.");
   const model = educatorVoiceModel(text);
@@ -78,12 +105,17 @@ export function buildEducatorSpeechRequest(script: string, voiceId: string) {
     loggedModels.add(model);
     console.info("Pedagogy educator voice model", { path: model === EDUCATOR_GUJARATI_VOICE_MODEL ? "gujarati-v3" : "multilingual-v2", model });
   }
-  // eleven_v3 only accepts stability 0, 0.5 or 1 (Creative, Natural, Robust).
-  const stability = model === EDUCATOR_GUJARATI_VOICE_MODEL ? 0.5 : 0.45;
-  return {
-    url: `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
-    body: { text, model_id: model, voice_settings: { stability, similarity_boost: 0.8, speed: EDUCATOR_VOICE_SPEED } },
-  };
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`;
+  if (model === EDUCATOR_GUJARATI_VOICE_MODEL) {
+    // eleven_v3 only accepts stability 0, 0.5 or 1 (Creative, Natural, Robust).
+    return { url, body: { text, model_id: model, voice_settings: { stability: 0.5, similarity_boost: 0.8, speed: EDUCATOR_VOICE_SPEED } } as { text: string; model_id: string; voice_settings?: { stability: number; similarity_boost: number; speed: number } } };
+  }
+  // The voice's own saved settings, a fixed seed, and the lines either side so each line continues one delivery.
+  const body: { text: string; model_id: string; seed: number; voice_settings?: SavedVoiceSettings; previous_text?: string; next_text?: string } = { text, model_id: model, seed: EDUCATOR_VOICE_SEED };
+  if (context.settings) body.voice_settings = context.settings;
+  if (context.previousText?.trim()) body.previous_text = context.previousText.trim();
+  if (context.nextText?.trim()) body.next_text = context.nextText.trim();
+  return { url, body: body as { text: string; model_id: string; seed?: number; voice_settings?: { stability: number; similarity_boost: number; speed: number }; previous_text?: string; next_text?: string } };
 }
 
 /**
@@ -91,7 +123,8 @@ export function buildEducatorSpeechRequest(script: string, voiceId: string) {
  * The model follows the line's script, so Hindi lines keep their old cache keys.
  */
 export function pedagogyVoiceCacheIdentity(voice: PedagogyVoice = resolvePedagogyVoice(), script = "") {
-  return voice.provider === "openai" ? null : { provider: voice.provider, voiceId: voice.voiceId, model: educatorVoiceModel(script), speed: EDUCATOR_VOICE_SPEED };
+  const model = educatorVoiceModel(script);
+  return voice.provider === "openai" ? null : { provider: voice.provider, voiceId: voice.voiceId, model, speed: model === EDUCATOR_GUJARATI_VOICE_MODEL ? EDUCATOR_VOICE_SPEED : EDUCATOR_VOICE_SETTINGS };
 }
 
 /** ElevenLabs voice types that are NOT a copy of a real person's voice. */
@@ -154,9 +187,10 @@ async function elevenLabsErrorCode(response: Response) {
   }
 }
 
-export async function generatePedagogyNarrationTrack(script: string, voice: PedagogyVoice = resolvePedagogyVoice()) {
+export async function generatePedagogyNarrationTrack(script: string, voice: PedagogyVoice = resolvePedagogyVoice(), context: { previousText?: string; nextText?: string } = {}) {
   if (voice.provider === "elevenlabs") {
-    const request = buildEducatorSpeechRequest(script, voice.voiceId);
+    const settings = educatorVoiceModel(script) === EDUCATOR_GUJARATI_VOICE_MODEL ? null : await loadSavedVoiceSettings(voice.voiceId);
+    const request = buildEducatorSpeechRequest(script, voice.voiceId, { ...context, settings });
     const response = await fetch(request.url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "audio/mpeg", "xi-api-key": process.env.ELEVENLABS_API_KEY ?? "" },

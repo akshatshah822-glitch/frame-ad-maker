@@ -31,6 +31,10 @@ function suppliedRows(value: unknown): PedagogyBriefInputRow[] {
       narration: row.narration, board: row.board, emphasis: row.emphasis, pauseAfter: row.pauseAfter,
       questionText: row.questionText, optionA: options[0], optionB: options[1], optionC: options[2], optionD: options[3], optionE: options[4],
       layout: row.layout, working: row.working, arcs: row.arcs, result: row.result, diagram: row.diagram, diagramStep: row.diagramStep, diagramLabels: row.diagramLabels, diagramItems: Array.isArray(row.diagramItems) ? row.diagramItems.join(" | ") : row.diagramItems,
+      visual: row.visual, visualData: row.visualData,
+      // layout = solution: the reviewed row carries its effective problem, steps and drawn count; send them back as
+      // the sheet columns so the render sees exactly what the review checked.
+      ...(row.layout === "solution" ? { problem: row.effectiveProblem, steps: row.effectiveSteps, draw: row.solutionDrawn, theme: row.effectiveTheme, trap: row.effectiveTrap, trick: row.effectiveTrick, remember: row.effectiveRemember } : {}),
     };
   });
 }

@@ -60,19 +60,21 @@ test("Gujarati narration switches the educator voice to eleven_v3; Hindi stays o
   const { educatorVoiceModel, pedagogyVoiceCacheIdentity } = await import("../src/lib/pedagogy-voice");
   const gujarati = buildEducatorSpeechRequest("બાળકનો વિકાસ સતત ચાલે છે.", "v");
   assert.equal(gujarati.body.model_id, "eleven_v3");
-  assert.equal(gujarati.body.voice_settings.stability, 0.5);
+  assert.equal(gujarati.body.voice_settings?.stability, 0.5);
   assert.equal(educatorVoiceModel("छियानवे गुणा अट्ठानवे।"), "eleven_multilingual_v2");
   const voice = { provider: "elevenlabs" as const, label: "educator" as const, voiceId: "v", consentRef: "c" };
   assert.equal(pedagogyVoiceCacheIdentity(voice, "છ")?.model, "eleven_v3");
   assert.equal(pedagogyVoiceCacheIdentity(voice, "छह")?.model, "eleven_multilingual_v2");
 });
 
-test("educator narration is slowed to 0.9 and the speed is part of the audio cache identity", async () => {
-  const { EDUCATOR_VOICE_SPEED, pedagogyVoiceCacheIdentity } = await import("../src/lib/pedagogy-voice");
+test("Hindi/English lines use the voice's own saved settings; Gujarati keeps 0.9; both are part of the cache identity", async () => {
+  const { EDUCATOR_VOICE_SPEED, EDUCATOR_VOICE_SETTINGS, pedagogyVoiceCacheIdentity } = await import("../src/lib/pedagogy-voice");
   assert.equal(EDUCATOR_VOICE_SPEED, 0.9);
-  assert.equal(buildEducatorSpeechRequest("छह", "v").body.voice_settings.speed, 0.9);
+  assert.equal(buildEducatorSpeechRequest("छह", "v").body.voice_settings, undefined, "no forced settings: the voice sounds as saved");
+  assert.equal(buildEducatorSpeechRequest("છ", "v").body.voice_settings?.speed, 0.9);
   const voice = { provider: "elevenlabs" as const, label: "educator" as const, voiceId: "v", consentRef: "c" };
-  assert.equal(pedagogyVoiceCacheIdentity(voice, "छह")?.speed, 0.9, "old faster audio is not reused from the cache");
+  assert.equal(pedagogyVoiceCacheIdentity(voice, "छह")?.speed, EDUCATOR_VOICE_SETTINGS, "audio made with forced settings is not reused");
+  assert.equal(pedagogyVoiceCacheIdentity(voice, "છ")?.speed, 0.9);
 });
 
 test("a refused educator line keeps ElevenLabs' reason in the error, without the key", async () => {

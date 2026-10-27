@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { PedagogyRow } from "@/lib/pedagogy-brief";
 import { DEFAULT_PEDAGOGY_CACHE_DIRECTORY, ESTIMATED_TTS_USD_PER_MINUTE, readCachedNarration, storeCachedNarration } from "@/lib/pedagogy-narration-cache";
 import { assertEducatorVoiceAllowed, generatePedagogyNarrationTrack, resolvePedagogyVoice } from "@/lib/pedagogy-voice";
+import { spokenNarration } from "@/lib/pedagogy-spoken";
 
 const exec = promisify(execFile);
 
@@ -60,7 +61,7 @@ export type PedagogyNarrationTrackOptions = {
   useCache?: boolean;
   cacheDirectory?: string;
   /** Test seam; defaults to the real pedagogy TTS call. */
-  generate?: (narration: string) => Promise<Uint8Array>;
+  generate?: (narration: string, context?: { previousText?: string; nextText?: string }) => Promise<Uint8Array>;
 };
 
 export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directory: string, onProgress?: (progress: { completed: number; total: number }) => void, options: PedagogyNarrationTrackOptions = {}) {
@@ -70,17 +71,23 @@ export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directo
   const cacheDirectory = options.cacheDirectory ?? DEFAULT_PEDAGOGY_CACHE_DIRECTORY;
   const voice = resolvePedagogyVoice();
   if (!options.generate) await assertEducatorVoiceAllowed(voice);
-  const generate = options.generate ?? ((narration: string) => generatePedagogyNarrationTrack(narration, voice));
+  const generate = options.generate ?? ((narration: string, context?: { previousText?: string; nextText?: string }) => generatePedagogyNarrationTrack(narration, voice, context));
   const usage = { generated: 0, cacheHits: 0, generatedCharacters: 0, generatedSeconds: 0 };
+  // The voice says numbers in English words and ₹ as "rupees"; the cache is keyed on that spoken text.
+  const spoken = rows.map((row) => spokenNarration(row.narration));
+  const rewritten = spoken.filter((text, index) => text !== rows[index].narration.trim()).length;
+  console.info("Pedagogy spoken numbers", { path: rewritten ? "english-number-words" : "unchanged", linesRewritten: rewritten, lines: rows.length });
   for (const [index, row] of rows.entries()) {
+    const script = spoken[index];
     const narrationPath = join(directory, `narration-${String(index).padStart(4, "0")}.mp3`);
     let fromCache = false;
     try {
-      const cached = useCache ? await readCachedNarration(row.narration, cacheDirectory) : null;
+      const cached = useCache ? await readCachedNarration(script, cacheDirectory) : null;
       fromCache = cached !== null;
-      const audio = cached ?? await generate(row.narration);
+      // The lines either side go with each request, so the voice carries one delivery through the video.
+      const audio = cached ?? await generate(script, { previousText: spoken[index - 1], nextText: spoken[index + 1] });
       try { await writeFile(narrationPath, audio); } catch { throw new PedagogyNarrationMeasurementError(row.sourceRow, "audio-write"); }
-      if (!fromCache && useCache) await storeCachedNarration(row.narration, audio, cacheDirectory);
+      if (!fromCache && useCache) await storeCachedNarration(script, audio, cacheDirectory);
     } catch (error) {
       if (error instanceof PedagogyNarrationMeasurementError) throw error;
       // Keep the provider's reason visible (HTTP status and error code only, never the key).
@@ -91,7 +98,7 @@ export async function createPedagogyNarrationTracks(rows: PedagogyRow[], directo
     if (fromCache) usage.cacheHits += 1;
     else {
       usage.generated += 1;
-      usage.generatedCharacters += row.narration.length;
+      usage.generatedCharacters += script.length;
       try { usage.generatedSeconds += await probeDuration(narrationPath); } catch { /* duration is probed again below and fails loudly there */ }
     }
     if (options.trimSilence) {

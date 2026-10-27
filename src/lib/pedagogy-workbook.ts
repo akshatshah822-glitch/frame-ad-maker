@@ -34,5 +34,14 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     diagramStep: row.diagram_step,
     diagramLabels: row.diagram_labels,
     diagramItems: row.diagram_items,
+    visual: row.visual,
+    visualData: row.visual_data,
+    problem: row.problem,
+    steps: row.steps,
+    draw: row.draw,
+    theme: row.theme,
+    trap: row.trap,
+    trick: row.trick,
+    remember: row.remember,
   } satisfies PedagogyBriefInputRow));
 }
