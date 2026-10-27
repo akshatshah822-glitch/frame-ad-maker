@@ -55,7 +55,8 @@ export function planJourneyRow(spec: JourneySpec, previous: JourneySpec | null, 
   for (let frame = 1; frame <= count; frame += 1) {
     const t = count === 1 ? 1 : frame / count;
     const flight = move ? Math.min(1, (t * animation) / move) : 1;
-    const fade = reveal ? Math.min(1, Math.max(0, (t * animation - Math.max(0, move - reveal * 0.6)) / reveal)) : 1;
+    // New glows, arcs and labels start fading in halfway through the flight, so the globe is never bare for long.
+    const fade = reveal ? Math.min(1, Math.max(0, (t * animation - move * 0.5) / reveal)) : 1;
     frames.push({
       duration: frame === count ? Math.max(1 / JOURNEY_FPS, span - (count - 1) / JOURNEY_FPS) : 1 / JOURNEY_FPS,
       state: {
