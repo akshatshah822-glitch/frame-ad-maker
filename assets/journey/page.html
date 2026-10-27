@@ -77,15 +77,18 @@ window.renderJourney = (st) => {
     if (x < 40 || x > edge || y < 120 || y > H - 150) return;
     // Labels never overlap each other or the notes panel, and stay clear of the header and the caption bar.
     const width = pin.text.length * 17 + 20;
-    const right = x < W * 0.62 ? x + 120 + width <= edge : x - 120 - width < 40, dx = right ? 120 : -120;
-    const left = right ? x + dx : x + dx - width;
+    // Prefer the open side; if the label fits on neither side, take the roomier one and slide it back on screen.
+    const fitsRight = x + 120 + width <= edge, fitsLeft = x - 120 - width >= 40;
+    const right = fitsRight && fitsLeft ? x < W * 0.62 : fitsRight || (!fitsLeft && edge - x > x);
+    const left = Math.max(40, Math.min(edge - width, right ? x + 120 : x - 120 - width)), dx = right ? left - x : left + width - x;
     let dy = [-110, 60, -30, 140, -170, 110][i % 6];
     const clash = (top) => placed.some((b) => left < b.right && left + width > b.left && top < b.bottom && top + 44 > b.top);
     for (let tries = 0; tries < 12 && (clash(y + dy - 22) || y + dy < 130 || y + dy > H - 170); tries += 1) dy = dy + (y + dy > H - 170 ? -56 : 56);
     placed.push({ left, right: left + width, top: y + dy - 22, bottom: y + dy + 22 });
     fg += `<g opacity="${pin.k}"><line x1="${x}" y1="${y}" x2="${x + dx}" y2="${y + dy}" stroke="${C[pin.colour]}" stroke-width="2"/><circle cx="${x}" cy="${y}" r="5" fill="${C[pin.colour]}"/></g>`;
     labels += `<div class="lab" style="opacity:${pin.k};left:${x + dx + (right ? 8 : -8)}px;top:${y + dy - 22}px;color:${C[pin.colour]};${right ? "" : "transform:translateX(-100%)"}">${esc(pin.text)}</div>`; });
-  if (st.cardLines.length) {
+  // With the notes panel on, the notes carry the board points, so the board card is not drawn twice.
+  if (st.cardLines.length && !st.notes?.length) {
     const words = st.cardLines.map((l) => l.replace(/^(board|cards):\s*/i, "")).join(" · ").split(/\s+/), lines = [""];
     for (const w of words) { if ((lines[lines.length - 1] + " " + w).trim().length > 34) lines.push(w); else lines[lines.length - 1] = (lines[lines.length - 1] + " " + w).trim(); }
     const h = 50 + lines.length * 52, top = 900 - h;
