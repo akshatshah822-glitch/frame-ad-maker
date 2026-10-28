@@ -26,6 +26,8 @@ export type BoardSlideState = {
   timeLabel: string;
   notes: BoardNotes;
   options?: string[];
+  /** diagram = figures: picture data URIs by file name (null = file missing, a labelled placeholder is drawn). */
+  figureImages?: Map<string, { href: string; width: number; height: number } | null>;
 };
 
 const BG = "#0f1724", INK = "#e8eef9", MUTED = "#7d8aa0", SOFT = "#b5c0d0", RULE = "#1c2840", PANEL = "#131d2e", PANEL_LINE = "#263552";
@@ -139,6 +141,18 @@ function panelDrawing(d: SolutionDiagram, drawn: number, x: number, y: number) {
   return s;
 }
 
+/** One figure tile: the picture fitted on a cream card, or a visible placeholder when the file is missing. */
+function figureTile(images: BoardSlideState["figureImages"], file: string, x: number, y: number, size: number, opacity = 1, frame = "") {
+  const image = images?.get(file) ?? null;
+  let g = `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="16" fill="#f6f3ea"/>`;
+  if (image) {
+    const k = Math.min((size - 20) / image.width, (size - 20) / image.height), w = image.width * k, h = image.height * k;
+    g += `<image href="${image.href}" x="${(x + (size - w) / 2).toFixed(1)}" y="${(y + (size - h) / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`;
+  } else g += text(x + size / 2, y + size / 2, 18, "#7d8aa0", esc(`Missing picture: ${file}`), 'text-anchor="middle"');
+  if (frame) g += `<rect x="${x - 5}" y="${y - 5}" width="${size + 10}" height="${size + 10}" rx="19" fill="none" stroke="${frame}" stroke-width="7"/>`;
+  return `<g opacity="${opacity.toFixed(3)}">${g}</g>`;
+}
+
 const therefore = (x: number, y: number, c: string) => [[x + 7, y - 24], [x, y - 9], [x + 14, y - 9]].map(([cx, cy]) => `<circle cx="${cx}" cy="${cy}" r="3.8" fill="${c}"/>`).join("");
 const KIND = { TRAP: R, TRICK: Y } as const;
 
@@ -186,6 +200,27 @@ export function boardSlideSvg(state: BoardSlideState, progress = 1) {
   // Options (MCQ), small, under the problem
   const options = (state.options ?? []).map((o) => o.trim()).filter(Boolean);
   if (options.length) { s += text(96, py, 24, MUTED, options.map((o, i) => `${"ABCDE"[i]}. ${esc(o)}`).join("     ")); py += 34; }
+  // diagram = figures: (X) then the options in one row under the problem; the answer step frames the found option.
+  const figures = state.diagram.kind === "figures" ? state.diagram : null;
+  if (figures) {
+    const size = 200, gap = 26, row = py + 4;
+    const fresh = (order: number) => order >= state.drawnBefore && order < state.drawn ? clamp(progress * 4) : 1;
+    const found = figures.found && figures.found.order < state.drawn ? figures.found : null;
+    let x = 96;
+    figures.figures.forEach((figure, i) => {
+      if (i === 1) x += 70;
+      if (figure.order < state.drawn) {
+        const isAnswer = found?.label === figure.label;
+        const dim = found && i > 0 && !isAnswer ? 0.35 : 1;
+        const swap = isAnswer && found ? fresh(found.order) : 0;
+        s += figureTile(state.figureImages, figure.file, x, row, size, fresh(figure.order) * dim);
+        if (isAnswer && found) s += figureTile(state.figureImages, found.file, x, row, size, swap, "#4fd1a5");
+        s += text(x + size / 2, row + size + 32, 26, isAnswer ? "#4fd1a5" : SOFT, esc(`(${figure.label})`), 'text-anchor="middle" font-weight="700"');
+      }
+      x += size + gap;
+    });
+    py = row + size + 64;
+  }
   const divider = Math.max(316, py - 10);
   s += `<line x1="96" y1="${divider}" x2="1824" y2="${divider}" stroke="${PANEL_LINE}" stroke-width="2"/>`;
 
@@ -225,9 +260,17 @@ export function boardSlideSvg(state: BoardSlideState, progress = 1) {
 
   // Right column: drawing of the trick, then the notes in words, then REMEMBER once the answer is written
   const panelTop = divider + 20;
-  s += `<rect x="1200" y="${panelTop}" width="624" height="300" rx="18" fill="${PANEL}" stroke="${PANEL_LINE}" stroke-width="2"/>`;
-  s += hand("Trick drawing", 1228, panelTop + 40, 24, MUTED).svg + panelDrawing(state.diagram, state.drawn, 1228, panelTop + 56);
-  let ny = panelTop + 360;
+  // With a figure row the board has less height left, so the panel is shorter.
+  const panelHeight = state.diagram.kind === "figures" ? 236 : 300;
+  s += `<rect x="1200" y="${panelTop}" width="624" height="${panelHeight}" rx="18" fill="${PANEL}" stroke="${PANEL_LINE}" stroke-width="2"/>`;
+  if (figures) {
+    // The panel shows (X) large while students look for it, then the found option with (X) traced in it.
+    const found = figures.found && figures.found.order < state.drawn ? figures.found : null;
+    const big = found ? found.file : figures.figures[0].file;
+    s += hand(found ? `(${figures.figures[0].label}) inside (${found.label})` : `Find (${figures.figures[0].label})`, 1228, panelTop + 40, 24, found ? "#4fd1a5" : MUTED).svg;
+    if (figures.figures[0].order < state.drawn) s += figureTile(state.figureImages, big, 1512 - 85, panelTop + 30, 176, 1, found ? "#4fd1a5" : "");
+  } else s += hand("Trick drawing", 1228, panelTop + 40, 24, MUTED).svg + panelDrawing(state.diagram, state.drawn, 1228, panelTop + 56);
+  let ny = panelTop + panelHeight + 60;
   for (const tag of notes) {
     if (tag.line >= state.shown && tag.line >= 0) continue;
     if (tag.line < 0 && state.shown === 0) continue;

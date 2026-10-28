@@ -14,7 +14,8 @@ import { probeFinalVideo } from "@/lib/video-qa";
 import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } from "@/lib/pedagogy-transition";
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
 import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
-import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps } from "@/lib/pedagogy-solution";
+import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, solutionDiagramFiles } from "@/lib/pedagogy-solution";
+import { loadPedagogyImage } from "@/lib/pedagogy-infographic";
 import { atlasSceneKey, openJourneyRenderer, planAtlasRow, planJourneyRow } from "@/lib/pedagogy-journey";
 import { createBoardSlide, createBoardTrickCard, type BoardSlideState } from "@/lib/pedagogy-board-slide";
 import { createSolutionSlide, solutionAnimationFrames, SOLUTION_FRAME_SECONDS, solutionSlideSizes, type SolutionSlideState } from "@/lib/pedagogy-solution-slide";
@@ -114,10 +115,14 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     const previous = timeline.rows[index - 1];
     const sameQuestion = previous?.layout === "solution" && previous.questionId === row.questionId;
     const emphasis = row.emphasis.trim() || timeline.rows.slice(0, index).reverse().find((earlier) => earlier.questionId === row.questionId && earlier.layout === "solution" && earlier.emphasis.trim())?.emphasis || "";
-    return { chapter: row.effectiveQuestionText.trim(), questionId: row.questionId, title: row.effectiveBoard, emphasis, problem: row.effectiveProblem, diagram: parseSolutionDiagram(row.diagram, row.diagramItems), lines: parseSolutionSteps(row.effectiveSteps, BOARD_MAX_LINES), shown: row.diagramStep, shownBefore: sameQuestion ? previous.diagramStep : 0, drawn: row.solutionDrawn, drawnBefore: sameQuestion ? Math.min(previous.solutionDrawn, row.solutionDrawn) : 0, timeLabel: row.adjustedGeneratedTimeLabel, notes: { trap: row.effectiveTrap, trick: row.effectiveTrick, remember: row.effectiveRemember }, options: row.effectiveOptions };
+    return { chapter: row.effectiveQuestionText.trim(), questionId: row.questionId, title: row.effectiveBoard, emphasis, problem: row.effectiveProblem, diagram: parseSolutionDiagram(row.diagram, row.diagramItems), lines: parseSolutionSteps(row.effectiveSteps, BOARD_MAX_LINES), shown: row.diagramStep, shownBefore: sameQuestion ? previous.diagramStep : 0, drawn: row.solutionDrawn, drawnBefore: sameQuestion ? Math.min(previous.solutionDrawn, row.solutionDrawn) : 0, timeLabel: row.adjustedGeneratedTimeLabel, notes: { trap: row.effectiveTrap, trick: row.effectiveTrick, remember: row.effectiveRemember }, options: row.effectiveOptions, figureImages };
   };
   const boardRows = timeline.rows.filter((row) => row.layout === "solution" && row.effectiveTheme === "board").length;
   if (boardRows) console.info("Pedagogy solution theme", { path: "board", boardRows });
+  // diagram = figures (board theme): load each picture once; loadPedagogyImage logs picture or placeholder per file.
+  const figureFiles = [...new Set(timeline.rows.flatMap((row) => row.layout === "solution" && row.diagram === "figures" ? solutionDiagramFiles(parseSolutionDiagram(row.diagram, row.diagramItems)) : []))];
+  const figureImages = new Map(await Promise.all(figureFiles.map(async (file) => [file, await loadPedagogyImage(file)] as const)));
+  if (figureFiles.length) console.info("Pedagogy board figures", { files: figureFiles.length, missing: [...figureImages].filter(([, image]) => !image).map(([file]) => file) });
   // One problem size and one card size for every solution slide in the video.
   let solutionSizes: SolutionSlideState["sizes"];
   for (const [index, row] of timeline.rows.entries()) {

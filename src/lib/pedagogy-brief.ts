@@ -457,12 +457,16 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       if (row.stepsText) retainedSteps = row.stepsText;
       if (!retainedDiagram) retainedDiagram = "none";
       try {
-        const parts = parseSolutionDiagram(retainedDiagram, retainedDiagramItems).parts;
+        const parsedDiagram = parseSolutionDiagram(retainedDiagram, retainedDiagramItems);
+        const parts = parsedDiagram.parts;
+        // figures: a blank draw on a question's first row shows the figures but keeps the answer ("found") hidden.
+        const firstDraw = parsedDiagram.kind === "figures" && parsedDiagram.found ? parts - 1 : parts;
+        if (retainedDiagram === "figures" && retainedTheme !== "board") throw rowError(row.sourceRow, 'diagram "figures" needs theme = board (the classic step-card look cannot show pictures).');
         if (row.drawText) {
           const drawn = Number(row.drawText);
           if (!Number.isInteger(drawn) || drawn < 0 || drawn > parts) throw rowError(row.sourceRow, `draw must be a whole number from 0 to ${parts} (how many diagram_items are drawn by this row).`);
           retainedDrawn = drawn;
-        } else retainedDrawn = retainedDrawn < 0 ? parts : Math.min(retainedDrawn, parts);
+        } else retainedDrawn = retainedDrawn < 0 ? firstDraw : Math.min(retainedDrawn, parts);
         solutionDrawn = retainedDrawn;
         const cards = parseSolutionSteps(retainedSteps, retainedTheme === "board" ? BOARD_MAX_LINES : SOLUTION_MAX_CARDS).length;
         // Margin notes point at a working line: "N | text" needs 1 ≤ N ≤ the number of lines.

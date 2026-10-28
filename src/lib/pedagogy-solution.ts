@@ -18,8 +18,13 @@
 //   bars        "SI @ 30 @ 30% | CI @ 44 @ 44% | note Gap = 14%"                      (label @ length @ caption)
 //   chain       "CP 100 | + x% > MP | − 10% > SP 105.3 | note ..."                    (first box, then "operation > box")
 //   table       "Items = Cost = Profit | 2 = ₹200 = ₹20 | note ..."                    (first item is the header; *stars* highlight)
+//   figures     "X = q66_x.png | a = q66_a.png | b = q66_b.png | c = q66_c.png | d = q66_d.png | found a = q66_a_found.png"
+//               (theme = board only) non-verbal figures from the pedagogy-images folder: the question figure X, then
+//               2–5 option figures in a row under the problem; "found <option> = file" is the answer step: that option
+//               gets a green frame and the file (the option with the figure traced in it) replaces it and fills the
+//               trick drawing panel. Put it last and reveal it with `draw` on the answer row.
 
-export const SOLUTION_DIAGRAMS = ["numberline", "units", "bars", "chain", "table", "none"] as const;
+export const SOLUTION_DIAGRAMS = ["numberline", "units", "bars", "chain", "table", "figures", "none"] as const;
 export type SolutionDiagramKind = (typeof SOLUTION_DIAGRAMS)[number];
 export const SOLUTION_MAX_CARDS = 5;
 /** theme = board writes the solution as working lines on the board: up to 8 lines (the last may be "Answer: …"). */
@@ -36,7 +41,14 @@ export type SolutionDiagram = { parts: number } & (
   | { kind: "numberline"; points: { label: string; at: number; colour: string; order: number }[]; wall?: { label: string; at: number; order: number }; arcs: { label: string; from: number; to: number; colour?: string; order: number }[]; bracket?: { label: string; from: number; to: number; order: number } }
   | { kind: "units" | "bars"; rows: { label: string; value: number; caption: string; colour: string; order: number }[]; note: Note }
   | { kind: "chain"; nodes: { text: string; order: number }[]; operations: string[]; note: Note }
-  | { kind: "table"; header: string[]; rows: { cells: string[]; order: number }[]; note: Note });
+  | { kind: "table"; header: string[]; rows: { cells: string[]; order: number }[]; note: Note }
+  | { kind: "figures"; figures: { label: string; file: string; order: number }[]; found: { label: string; file: string; order: number } | null });
+
+/** Picture files the figures diagram names (pedagogy-images folder). */
+export function solutionDiagramFiles(diagram: SolutionDiagram) {
+  return diagram.kind === "figures" ? [...diagram.figures.map((figure) => figure.file), ...(diagram.found ? [diagram.found.file] : [])] : [];
+}
+const FIGURE_FILE = /^[\w.-]+\.(png|jpe?g|webp)$/i;
 
 export class SolutionParseError extends Error {
   constructor(message: string) { super(message); this.name = "SolutionParseError"; }
@@ -136,6 +148,28 @@ export function parseSolutionDiagram(kind: string, items: string[]): SolutionDia
     }
     if (nodes.length < 2 || nodes.length > 5) fail(`chain needs 2–5 boxes; found ${nodes.length}.`);
     return { kind, parts, nodes, operations, note };
+  }
+  if (kind === "figures") {
+    const figures: { label: string; file: string; order: number }[] = [];
+    let found: { label: string; file: string; order: number } | null = null;
+    items.forEach((item, order) => {
+      const at = item.indexOf("=");
+      if (at < 0) fail(`figures item ${JSON.stringify(item)} must look like "a = q66_a.png".`);
+      const left = item.slice(0, at).trim(), file = item.slice(at + 1).trim();
+      if (!FIGURE_FILE.test(file)) fail(`figures item ${JSON.stringify(item)}: ${JSON.stringify(file)} must be a picture file name like q66_a.png.`);
+      const answer = keyword(left, "found");
+      if (answer !== null) {
+        if (found) fail("figures takes one \"found\" item.");
+        found = { label: answer, file, order };
+      } else {
+        if (found) fail("the \"found\" item must come last in figures.");
+        figures.push({ label: left, file, order });
+      }
+    });
+    if (figures.length < 3 || figures.length > 6) fail(`figures needs the question figure and 2–5 options; found ${figures.length} figures.`);
+    const answer = found as { label: string } | null;
+    if (answer && !figures.slice(1).some((figure) => figure.label === answer.label)) fail(`figures: "found ${answer.label}" names no option; the options are ${figures.slice(1).map((figure) => figure.label).join(", ")}.`);
+    return { kind, parts, figures, found };
   }
   const [header, ...rows] = body.map(({ raw, order }) => ({ cells: raw.split(/\s+=\s+/).map((cell) => cell.trim()), order }));
   if (!header || header.cells.length < 2 || header.cells.length > 5) fail("table needs a header row with 2–5 columns separated by \" = \".");
