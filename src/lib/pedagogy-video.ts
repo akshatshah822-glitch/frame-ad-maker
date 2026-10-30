@@ -75,6 +75,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   let lastFrame = "";
   let crossfades = 0;
   let trickCards = 0;
+  let hookCards = 0;
   const trickRows = timeline.rows.filter((row) => row.layout === "trick").length;
   const passageRows = timeline.rows.filter((row) => row.layout === "passage").length;
   const diagramRows = timeline.rows.filter((row) => row.layout === "diagram").length;
@@ -250,17 +251,37 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
       } else if (row.layout === "solution" && row.effectiveTheme === "board") {
         const previous = timeline.rows[index - 1];
         const state = solveBoardState(index);
+        // card = yes (e.g. an opening hook): the trick card holds for the whole spoken line; the board fades in after it.
+        if (row.showCard) {
+          const cardPath = `${framePrefix}-hook.png`;
+          await writeFile(cardPath, await createBoardTrickCard(state, portrait));
+          concatLines.push(`file '${cardPath}'`, `duration ${row.allocatedDuration.toFixed(6)}`);
+          lastFrame = cardPath;
+          hookCards += 1;
+          onProgress?.({ phase: "rendering-slides", completed: index + 1, total: rows.length });
+          continue;
+        }
+        const afterCard = Boolean(previous?.showCard) && previous.questionId === row.questionId;
         // Writing is synced to the voice: a new working line is written across the time it is spoken.
         const newLine = state.shown > state.shownBefore;
         const newItems = state.drawn - state.drawnBefore;
         const spoken = narrationDurations[index];
-        const newTopic = Boolean(lastFrame) && Boolean(previous) && previous.questionId !== row.questionId;
+        const newTopic = (Boolean(lastFrame) && Boolean(previous) && previous.questionId !== row.questionId) || afterCard;
         const cardSeconds = newTopic ? Math.min(1.2, row.allocatedDuration * 0.25) : 0;
         const fadeSeconds = newTopic ? Math.min(TOPIC_TRANSITION_SECONDS, row.allocatedDuration * 0.2) : 0;
         const room = row.allocatedDuration - cardSeconds - fadeSeconds - 0.05;
         const animationSeconds = newLine ? Math.max(0.6, Math.min(spoken * 0.92, room)) : newItems > 0 ? Math.min(1.2, room * 0.6) : 0;
         const frames = animationSeconds ? Math.min(150, Math.max(8, Math.round(animationSeconds * 12))) : 1;
-        if (newTopic) {
+        if (newTopic && afterCard) {
+          // Fade from the hook card straight into the board (the card was already shown).
+          const incoming = await createBoardSlide(state, 0, portrait);
+          for (let frame = 1; frame <= TOPIC_TRANSITION_FRAMES; frame += 1) {
+            const framePath = `${framePrefix}-t${String(frame).padStart(2, "0")}.png`;
+            await writeFile(framePath, await crossfadeFrame(lastFrame, incoming, frame / (TOPIC_TRANSITION_FRAMES + 1)));
+            concatLines.push(`file '${framePath}'`, `duration ${((cardSeconds + fadeSeconds) / TOPIC_TRANSITION_FRAMES).toFixed(6)}`);
+          }
+          crossfades += 1;
+        } else if (newTopic) {
           const cardPath = `${framePrefix}-card.png`;
           await writeFile(cardPath, await createBoardTrickCard(state, portrait));
           concatLines.push(`file '${cardPath}'`, `duration ${cardSeconds.toFixed(6)}`);
@@ -351,7 +372,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     }
     onProgress?.({ phase: "rendering-slides", completed: index + 1, total: rows.length });
   }
-  console.info("Pedagogy topic transitions", { path: crossfades ? "crossfade" : "cut", crossfades, trickCards });
+  console.info("Pedagogy topic transitions", { path: crossfades ? "crossfade" : "cut", crossfades, trickCards, hookCards });
   concatLines.push(`file '${lastFrame}'`);
   const concatPath = join(directory, "timeline.txt");
   await writeFile(concatPath, concatLines.join("\n"));

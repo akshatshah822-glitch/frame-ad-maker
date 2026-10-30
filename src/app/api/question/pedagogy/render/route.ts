@@ -38,6 +38,7 @@ function suppliedRows(value: unknown): PedagogyBriefInputRow[] {
       // gs_theme = journey: the reviewed camera, labels, effects and caption go back as the sheet columns too.
       gsTheme: row.gsTheme,
       orientation: row.effectiveOrientation,
+      card: row.showCard ? "yes" : "",
       ...(row.journey && typeof row.journey === "object" ? journeyToColumns(row.journey as JourneySpec) : {}),
       ...(row.layout === "solution" ? { problem: row.effectiveProblem, steps: row.effectiveSteps, draw: row.solutionDrawn, theme: row.effectiveTheme, trap: row.effectiveTrap, trick: row.effectiveTrick, remember: row.effectiveRemember } : {}),
     };

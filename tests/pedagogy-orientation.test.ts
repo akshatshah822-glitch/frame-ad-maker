@@ -37,3 +37,12 @@ test("portrait slides are 1080 × 1920; landscape slides are still 1920 × 1080"
   assert.match(portrait, /width="1080" height="1920"/);
   assert.match(portrait, /ANSWER/);
 });
+
+test("card = yes shows the trick card on a board row; older sheets have no card; wrong use is a row error", () => {
+  const base = { ...first, theme: "board", orientation: "portrait" };
+  const rows = validatePedagogyRows([row(1, { ...base, card: "yes" }), row(2, { card: "Yes" }), row(3)]);
+  assert.deepEqual(rows.map((r) => r.showCard), [true, true, false]);
+  assert.deepEqual(validatePedagogyRows([row(1, first), row(2)]).map((r) => r.showCard), [false, false]);
+  assert.throws(() => validatePedagogyRows([row(1, { ...first, card: "yes" })]), /Row 2: card = yes needs layout = solution and theme = board/);
+  assert.throws(() => validatePedagogyRows([row(1, { ...base, card: "maybe" })]), /card must be "yes", "no", or blank/);
+});

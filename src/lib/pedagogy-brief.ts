@@ -53,6 +53,9 @@ export type PedagogyBriefInputRow = {
   /** Optional (Oct 30 2026): "landscape" (1920 × 1080) or "portrait" (1080 × 1920), set once on the first row.
    * Blank or missing = landscape, so every older sheet renders exactly as before. Portrait draws layout = solution only. */
   orientation?: unknown;
+  /** Optional (Oct 30 2026), theme = board only: "yes" = this row shows the full-screen trick card (chapter + trick
+   * name) while it is spoken, e.g. an opening hook. Blank = the board, as before. */
+  card?: unknown;
   /** Optional, theme = board only: margin notes "N | text" (N = working line the arrow points at) or "text".
    * Carry forward within a question_id. */
   trap?: unknown;
@@ -119,6 +122,8 @@ export type PedagogyRow = {
   effectiveTheme: "classic" | "board";
   /** Video shape for the whole sheet: landscape unless the first row says portrait. */
   effectiveOrientation: "landscape" | "portrait";
+  /** theme = board: this row shows the trick card instead of the board. */
+  showCard: boolean;
   effectiveTrap: string;
   effectiveTrick: string;
   effectiveRemember: string;
@@ -306,6 +311,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       drawText: valueAsText(input.draw).trim(),
       themeText: valueAsText(input.theme).trim().toLowerCase(),
       orientationText: valueAsText(input.orientation).trim().toLowerCase(),
+      cardText: valueAsText(input.card).trim().toLowerCase(),
       trapText: valueAsText(input.trap).trim(),
       trickText: valueAsText(input.trick).trim(),
       rememberText: valueAsText(input.remember).trim(),
@@ -458,6 +464,9 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       if (row.themeText !== "classic" && row.themeText !== "board") throw rowError(row.sourceRow, 'theme must be "classic", "board", or blank.');
       retainedTheme = row.themeText;
     }
+    if (row.cardText && !["yes", "no"].includes(row.cardText)) throw rowError(row.sourceRow, 'card must be "yes", "no", or blank.');
+    const showCard = row.cardText === "yes";
+    if (showCard && (row.layout !== "solution" || retainedTheme !== "board")) throw rowError(row.sourceRow, 'card = yes needs layout = solution and theme = board (the trick card is part of the board theme).');
     if (row.trapText) retainedNotes.trap = row.trapText;
     if (row.trickText) retainedNotes.trick = row.trickText;
     if (row.rememberText) retainedNotes.remember = row.rememberText;
@@ -502,8 +511,8 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       effectiveSteps = retainedSteps;
     }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, orientationText, trapText, trickText, rememberText, gsThemeText, cameraText, labelsText, effectsText, captionText, sourceTsText, badgeText, chapterText, noteText, notesText, notesTitleText, sceneText, sceneTitleText, sceneItemsText, chapterCardText, ...rest } = row;
-    void themeText; void orientationText; void trapText; void trickText; void rememberText;
+    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, orientationText, cardText, trapText, trickText, rememberText, gsThemeText, cameraText, labelsText, effectsText, captionText, sourceTsText, badgeText, chapterText, noteText, notesText, notesTitleText, sceneText, sceneTitleText, sceneItemsText, chapterCardText, ...rest } = row;
+    void themeText; void orientationText; void cardText; void trapText; void trickText; void rememberText;
     void gsThemeText; void cameraText; void labelsText; void effectsText; void captionText; void sourceTsText; void badgeText; void chapterText; void noteText; void notesText; void notesTitleText; void sceneText; void sceneTitleText; void sceneItemsText; void chapterCardText;
     const atlas: AtlasSpec | undefined = retainedGsTheme === "atlas"
       ? { scene: retainedScene, sceneTitle: retainedSceneTitle[0], sceneSubtitle: retainedSceneTitle[1], items: retainedSceneItems, chapterCard: chapterCard ? { title: chapterCard[0], question: chapterCard[1] } : null, headline: retainedQuestionText.trim() }
@@ -521,7 +530,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     void diagramItemsText;
     const diagramItems = (row.layout === "diagram" && isInfographic(diagram)) || row.layout === "solution" ? retainedDiagramItems : [];
     const diagramLabels = row.layout === "diagram" ? retainedDiagramLabels : "hi";
-    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveProblem, effectiveSteps, solutionDrawn, effectiveTheme: retainedTheme, effectiveOrientation: orientation, effectiveTrap: solution ? retainedNotes.trap : "", effectiveTrick: solution ? retainedNotes.trick : "", effectiveRemember: solution ? retainedNotes.remember : "", gsTheme: retainedGsTheme, journey, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveProblem, effectiveSteps, solutionDrawn, effectiveTheme: retainedTheme, effectiveOrientation: orientation, showCard, effectiveTrap: solution ? retainedNotes.trap : "", effectiveTrick: solution ? retainedNotes.trick : "", effectiveRemember: solution ? retainedNotes.remember : "", gsTheme: retainedGsTheme, journey, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 
