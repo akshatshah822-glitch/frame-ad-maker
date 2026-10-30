@@ -40,6 +40,7 @@ export function extractPedagogyRowsFromWorkbook(buffer: ArrayBuffer) {
     steps: row.steps,
     draw: row.draw,
     theme: row.theme,
+    orientation: row.orientation,
     trap: row.trap,
     trick: row.trick,
     remember: row.remember,

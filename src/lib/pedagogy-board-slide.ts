@@ -288,8 +288,8 @@ export function boardSlideSvg(state: BoardSlideState, progress = 1) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">${s}</svg>`;
 }
 
-export async function createBoardSlide(state: BoardSlideState, progress = 1) {
-  return sharp(Buffer.from(boardSlideSvg(state, progress))).png().toBuffer();
+export async function createBoardSlide(state: BoardSlideState, progress = 1, portrait = false) {
+  return sharp(Buffer.from(portrait ? boardSlideSvgPortrait(state, progress) : boardSlideSvg(state, progress))).png().toBuffer();
 }
 
 /** Full-screen card at the start of a question: the trick's name, handwritten, English then Hindi. */
@@ -308,6 +308,157 @@ export function boardTrickCardSvg(state: Pick<BoardSlideState, "chapter" | "ques
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">${s}</svg>`;
 }
 
-export async function createBoardTrickCard(state: Pick<BoardSlideState, "chapter" | "questionId" | "title" | "emphasis">) {
-  return sharp(Buffer.from(boardTrickCardSvg(state))).png().toBuffer();
+export async function createBoardTrickCard(state: Pick<BoardSlideState, "chapter" | "questionId" | "title" | "emphasis">, portrait = false) {
+  return sharp(Buffer.from(portrait ? boardTrickCardSvgPortrait(state) : boardTrickCardSvg(state))).png().toBuffer();
+}
+
+// Portrait (1080 × 1920, Oct 30 2026): the same board stacked for a phone screen. Problem on top, working lines
+// in the middle, trick drawing / found figure, notes and REMEMBER below. The landscape board above is unchanged.
+const PW = 1080, PH = 1920, PS = 72, PR = PW - PS;
+
+export function boardSlideSvgPortrait(state: BoardSlideState, progress = 1) {
+  const drawing = state.drawn > state.drawnBefore;
+  const pace = drawing ? clamp((progress - 0.25) / 0.75) : clamp(progress);
+  let s = `<rect width="${PW}" height="${PH}" fill="${BG}"/>`;
+  const pill = [state.chapter, state.questionId].filter((part) => part.trim()).join(" · ").toUpperCase();
+  const pillW = Math.min(PR - PS - 160, systemWidth(pill, 26) * 1.06 + 56);
+  s += `<rect x="${PS}" y="60" width="${pillW.toFixed(1)}" height="48" rx="24" fill="#1d3557"/>${text(PS + pillW / 2, 94, 26, "#8cc4ff", esc(pill), 'text-anchor="middle" letter-spacing="1.5"')}`;
+  s += text(PR, 94, 24, MUTED, esc(state.timeLabel), 'text-anchor="end"');
+  // Title: English (wrapped, emphasis in yellow), then the Hindi in brackets on its own line.
+  const bracket = state.title.indexOf(" (");
+  const english = bracket > 0 ? state.title.slice(0, bracket) : state.title;
+  const hindi = bracket > 0 ? state.title.slice(bracket + 1) : "";
+  const emphasis = state.emphasis.trim();
+  let ty = 196;
+  for (const line of wrapWords(english.split(/\s+/).filter(Boolean).map((t) => ({ text: t, mark: 0 })), 56, PR - PS)) {
+    const plain = line.map((w) => w.text).join(" ");
+    const body = emphasis && plain.includes(emphasis) ? plain.split(emphasis).map(esc).join(`<tspan fill="${Y}">${esc(emphasis)}</tspan>`) : esc(plain);
+    s += text(PS, ty, 56, INK, body, 'font-weight="800"');
+    ty += 66;
+  }
+  if (hindi) { s += text(PS, ty - 8, 40, "#cfd8e6", esc(hindi), 'font-weight="600"'); ty += 50; }
+  // Problem: English then Hindi, wrapped to the phone width; starred values turn red as their line is written.
+  const [enText, hiText = ""] = state.problem.split(" / ");
+  let py = ty + 22;
+  for (const line of wrapWords(problemWords(enText), 32, PR - PS)) {
+    let x = PS;
+    const parts: string[] = [];
+    line.forEach((word, k) => {
+      const red = word.mark > 0 && word.mark <= state.shown;
+      const w = systemWidth(word.text, 32, red);
+      if (red) {
+        const fresh = word.mark === state.shown && state.shown > state.shownBefore;
+        const next = line[k + 1];
+        s += handUnderline(x - 2, x + w + (next && next.mark === word.mark ? systemWidth(" ", 32) : 0) + 2, py + 9, R, `${word.text}${py}`, fresh ? pace : 1, 3);
+      }
+      parts.push(red ? `<tspan fill="${R}" font-weight="700">${esc(word.text)}</tspan>` : esc(word.text));
+      x += w + systemWidth(" ", 32);
+    });
+    s += text(PS, py, 32, SOFT, parts.join(" "));
+    py += 46;
+  }
+  for (const line of wrapWords(problemWords(hiText), 30, PR - PS)) { s += text(PS, py, 30, SOFT, esc(line.map((w) => w.text).join(" "))); py += 44; }
+  const options = (state.options ?? []).map((o) => o.trim()).filter(Boolean);
+  if (options.length) {
+    for (const line of wrapWords(options.map((o, i) => ({ text: `${"ABCDE"[i]}. ${o}   `, mark: 0 })), 28, PR - PS)) { s += text(PS, py, 28, MUTED, esc(line.map((w) => w.text).join(" "))); py += 40; }
+  }
+  // Figures: (X) then a–d in one row across the phone width.
+  const figures = state.diagram.kind === "figures" ? state.diagram : null;
+  if (figures) {
+    const size = 168, gap = 12, extra = 40, row = py + 4;
+    const fresh = (order: number) => order >= state.drawnBefore && order < state.drawn ? clamp(progress * 4) : 1;
+    const found = figures.found && figures.found.order < state.drawn ? figures.found : null;
+    let x = PS + (PR - PS - (figures.figures.length * size + (figures.figures.length - 2) * gap + extra)) / 2;
+    figures.figures.forEach((figure, i) => {
+      if (i === 1) x += extra;
+      if (figure.order < state.drawn) {
+        const isAnswer = found?.label === figure.label;
+        const dim = found && i > 0 && !isAnswer ? 0.35 : 1;
+        s += figureTile(state.figureImages, figure.file, x, row, size, fresh(figure.order) * dim);
+        if (isAnswer && found) s += figureTile(state.figureImages, found.file, x, row, size, fresh(found.order), "#4fd1a5");
+        s += text(x + size / 2, row + size + 34, 28, isAnswer ? "#4fd1a5" : SOFT, esc(`(${figure.label})`), 'text-anchor="middle" font-weight="700"');
+      }
+      x += size + gap;
+    });
+    py = row + size + 66;
+  }
+  const divider = py + 6;
+  s += `<line x1="${PS}" y1="${divider}" x2="${PR}" y2="${divider}" stroke="${PANEL_LINE}" stroke-width="2"/>`;
+
+  // Bottom block (drawing panel, notes, REMEMBER) has a fixed height, so the working lines get what is left.
+  const notes = (["TRAP", "TRICK"] as const).map((kind) => ({ kind, ...note(kind === "TRAP" ? state.notes.trap : state.notes.trick) })).filter((x) => x.text);
+  const remember = note(state.notes.remember).text;
+  const panelHeight = figures ? 260 : 410;
+  const bottomBlock = panelHeight + 50 + notes.length * 66 + (remember ? 124 : 0) + 70;
+  const n = state.lines.length, first = divider + 92, margin = 170;
+  const step = Math.max(58, Math.min(86, (PH - bottomBlock - first - 40) / Math.max(1, n - 1)));
+  const fs = step >= 72 ? 40 : 34;
+  const base = (i: number) => first + i * step;
+  for (let i = 0; i < n; i += 1) s += `<line x1="${margin}" y1="${base(i) + 12}" x2="${PR}" y2="${base(i) + 12}" stroke="${RULE}" stroke-width="1.5"/>`;
+  s += `<line x1="${margin - 14}" y1="${divider + 18}" x2="${margin - 14}" y2="${base(Math.max(0, n - 1)) + 40}" stroke="#4a2a3a" stroke-width="2"/>`;
+  s += hand("Sol.", PS, divider + 48, 30, MUTED).svg;
+  const split = state.lines.map((line) => { const at = line.text.indexOf(" = "); return at > 0 ? { left: line.text.slice(0, at), right: line.text.slice(at + 3) } : { left: "", right: line.text }; });
+  const leftWidth = Math.max(0, ...split.map((p) => (p.left ? (handText(p.left, 0, 0, fs, INK)?.width ?? systemWidth(p.left, fs)) : 0)));
+  const eqX = Math.max(380, Math.min(560, margin + 40 + leftWidth + 22));
+  state.lines.forEach((line, i) => {
+    if (i >= state.shown) return;
+    const y = base(i), { left, right } = split[i];
+    const tag = notes.find((x) => x.line === i);
+    const l = left ? hand(left, eqX - 22, y, fs, INK, "end", eqX - 22 - margin - 24) : null;
+    const r = hand(right, left ? eqX + 24 : margin + 24, y, fs, INK, "start", PR - 10 - (left ? eqX + 24 : margin + 24));
+    const x1 = (l ? Math.min(l.left, eqX) : margin + 24) - 14, x2 = (left ? eqX + 24 : margin + 24) + r.width + 14;
+    let g = "";
+    if (tag) g += `<rect x="${x1.toFixed(1)}" y="${y - 46}" width="${(x2 - x1).toFixed(1)}" height="60" rx="10" fill="${KIND[tag.kind]}" opacity="0.11"/>`;
+    if (line.answer) g += therefore(x1 - 24, y, Y);
+    g += (l ? l.svg + hand("=", eqX, y, fs, INK, "middle").svg : "") + r.svg;
+    if (line.answer) g += `<rect x="${(x1 - 40).toFixed(1)}" y="${y - 50}" width="${Math.min(PR + 6 - (x1 - 40), x2 - x1 + 46).toFixed(1)}" height="68" rx="10" fill="none" stroke="${Y}" stroke-width="4"/>`;
+    const writing = i === state.shown - 1 && state.shown > state.shownBefore;
+    if (writing && pace < 1) {
+      if (pace <= 0) return;
+      const id = `pw${i}`;
+      g = `<clipPath id="${id}"><rect x="${(x1 - 60).toFixed(1)}" y="${y - 62}" width="${((x2 - x1 + 70) * pace).toFixed(1)}" height="92"/></clipPath><g clip-path="url(#${id})">${g}</g>`;
+    }
+    if (tag) { const w = tag.kind.length * 15 + 26; s += `<g opacity="${writing ? clamp(pace * 4).toFixed(3) : 1}"><rect x="${margin - 24 - w}" y="${y - 32}" width="${w}" height="38" rx="8" fill="${KIND[tag.kind]}"/>${text(margin - 24 - w / 2, y - 6, 19, "#111827", tag.kind, 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}</g>`; }
+    s += g;
+  });
+
+  // Panel under the working, full width: trick drawing, or (X) / the found option for figures.
+  const panelTop = base(Math.max(0, n - 1)) + 80;
+  s += `<rect x="${PS}" y="${panelTop}" width="${PR - PS}" height="${panelHeight}" rx="18" fill="${PANEL}" stroke="${PANEL_LINE}" stroke-width="2"/>`;
+  if (figures) {
+    const found = figures.found && figures.found.order < state.drawn ? figures.found : null;
+    s += hand(found ? `(${figures.figures[0].label}) inside (${found.label})` : `Find (${figures.figures[0].label})`, PS + 28, panelTop + 44, 28, found ? "#4fd1a5" : MUTED).svg;
+    if (figures.figures[0].order < state.drawn) s += figureTile(state.figureImages, found ? found.file : figures.figures[0].file, PW / 2 + 60, panelTop + 25, 200, 1, found ? "#4fd1a5" : "");
+  } else s += hand("Trick drawing", PS + 28, panelTop + 40, 24, MUTED).svg + `<g transform="translate(${PS + (PR - PS - 568 * 1.45) / 2} ${panelTop + 40}) scale(1.45)">${panelDrawing(state.diagram, state.drawn, 0, 0)}</g>`;
+  let ny = panelTop + panelHeight + 60;
+  for (const tag of notes) {
+    if (tag.line >= state.shown && tag.line >= 0) continue;
+    if (tag.line < 0 && state.shown === 0) continue;
+    const c = KIND[tag.kind], w = tag.kind.length * 15 + 26;
+    s += `<rect x="${PS}" y="${ny - 29}" width="${w}" height="38" rx="8" fill="${c}"/>${text(PS + w / 2, ny - 3, 19, "#111827", tag.kind, 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}`;
+    s += hand(tag.text, PS + w + 14, ny, 31, c, "start", PR - PS - w - 14).svg;
+    ny += 66;
+  }
+  if (remember && n > 0 && state.shown >= n) {
+    const fresh = state.shownBefore < n;
+    s += `<g opacity="${fresh ? clamp(pace * 2 - 0.6).toFixed(3) : 1}"><rect x="${PS}" y="${ny - 14}" width="${PR - PS}" height="108" rx="16" fill="#132034" stroke="${B}" stroke-width="2" stroke-dasharray="10 8"/><rect x="${PS + 22}" y="${ny + 4}" width="150" height="34" rx="8" fill="${B}"/>${text(PS + 97, ny + 28, 19, "#111827", "REMEMBER", 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}${hand(remember, PS + 22, ny + 76, 30, INK, "start", PR - PS - 44).svg}</g>`;
+  }
+  s += text(PR, PH - 30, 20, "#4f5d75", "FRAME", 'text-anchor="end" letter-spacing="2"');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}" viewBox="0 0 ${PW} ${PH}">${s}</svg>`;
+}
+
+/** Portrait trick card: same content as the landscape card, centred on a phone screen. */
+export function boardTrickCardSvgPortrait(state: Pick<BoardSlideState, "chapter" | "questionId" | "title" | "emphasis">) {
+  const pill = [state.chapter, state.questionId].filter((part) => part.trim()).join(" · ").toUpperCase();
+  const bracket = state.title.indexOf(" (");
+  const english = bracket > 0 ? state.title.slice(0, bracket) : state.title;
+  const hindi = bracket > 0 ? state.title.slice(bracket + 1) : "";
+  const emphasis = state.emphasis.trim();
+  const parts = emphasis && english.includes(emphasis) ? english.split(emphasis) : [english];
+  const runs = parts.flatMap((part, i) => (i < parts.length - 1 ? [{ text: part, fill: INK, bold: true }, { text: emphasis, fill: Y, bold: true }] : [{ text: part, fill: INK, bold: true }])).filter((run) => run.text);
+  const title = handText(runs, PW / 2, 930, 84, INK, { anchor: "middle", bold: true, maxWidth: PR - PS });
+  let s = `<rect width="${PW}" height="${PH}" fill="${BG}"/>${text(PW / 2, 760, 30, "#8cc4ff", esc(pill), 'text-anchor="middle" letter-spacing="3"')}${hand("Trick", PW / 2, 830, 38, MUTED, "middle").svg}`;
+  s += title ? title.svg + handUnderline(title.left + 30, title.left + title.width - 30, 966, Y, state.title, 1, 6) : text(PW / 2, 930, 72, INK, esc(english), 'text-anchor="middle" font-weight="800"');
+  if (hindi) s += text(PW / 2, 1060, 46, "#cfd8e6", esc(hindi), 'text-anchor="middle" font-weight="600"');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}" viewBox="0 0 ${PW} ${PH}">${s}</svg>`;
 }

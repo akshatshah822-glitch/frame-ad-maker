@@ -50,6 +50,9 @@ export type PedagogyBriefInputRow = {
   /** Optional, layout = solution only: "classic" (step cards, the look before Oct 23) or "board" (the solution written
    * line by line on the board in a handwriting font). Blank = the row before; a sheet without the column is classic. */
   theme?: unknown;
+  /** Optional (Oct 30 2026): "landscape" (1920 × 1080) or "portrait" (1080 × 1920), set once on the first row.
+   * Blank or missing = landscape, so every older sheet renders exactly as before. Portrait draws layout = solution only. */
+  orientation?: unknown;
   /** Optional, theme = board only: margin notes "N | text" (N = working line the arrow points at) or "text".
    * Carry forward within a question_id. */
   trap?: unknown;
@@ -114,6 +117,8 @@ export type PedagogyRow = {
   solutionDrawn: number;
   /** layout = solution: theme in force and the margin notes of this question ("" when none). */
   effectiveTheme: "classic" | "board";
+  /** Video shape for the whole sheet: landscape unless the first row says portrait. */
+  effectiveOrientation: "landscape" | "portrait";
   effectiveTrap: string;
   effectiveTrick: string;
   effectiveRemember: string;
@@ -300,6 +305,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       stepsText: valueAsText(input.steps).trim(),
       drawText: valueAsText(input.draw).trim(),
       themeText: valueAsText(input.theme).trim().toLowerCase(),
+      orientationText: valueAsText(input.orientation).trim().toLowerCase(),
       trapText: valueAsText(input.trap).trim(),
       trickText: valueAsText(input.trick).trim(),
       rememberText: valueAsText(input.remember).trim(),
@@ -336,6 +342,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedSteps = "";
   let retainedDrawn = -1;
   let retainedTheme: "classic" | "board" = "classic";
+  let orientation: "landscape" | "portrait" = "landscape";
   let retainedNotes = { trap: "", trick: "", remember: "" };
   let retainedGsTheme: "" | "journey" | "cinematic" | "atlas" = "";
   let retainedCamera: JourneyCamera = JOURNEY_DEFAULT_CAMERA;
@@ -441,6 +448,12 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     let effectiveProblem = "";
     let effectiveSteps = "";
     let solutionDrawn = 0;
+    if (row.orientationText) {
+      if (row.orientationText !== "landscape" && row.orientationText !== "portrait") throw rowError(row.sourceRow, 'orientation must be "landscape", "portrait", or blank.');
+      if (index > 0 && row.orientationText !== orientation) throw rowError(row.sourceRow, 'orientation is set once, on the first row, for the whole video.');
+      orientation = row.orientationText;
+    }
+    if (orientation === "portrait" && row.layout !== "solution") throw rowError(row.sourceRow, `orientation "portrait" draws layout = solution only for now (theme classic or board); this row is layout = ${row.layout}.`);
     if (row.themeText) {
       if (row.themeText !== "classic" && row.themeText !== "board") throw rowError(row.sourceRow, 'theme must be "classic", "board", or blank.');
       retainedTheme = row.themeText;
@@ -489,8 +502,8 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       effectiveSteps = retainedSteps;
     }
     const generatedTime = row.sourceSeconds - firstTimestamp;
-    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, trapText, trickText, rememberText, gsThemeText, cameraText, labelsText, effectsText, captionText, sourceTsText, badgeText, chapterText, noteText, notesText, notesTitleText, sceneText, sceneTitleText, sceneItemsText, chapterCardText, ...rest } = row;
-    void themeText; void trapText; void trickText; void rememberText;
+    const { diagramName, diagramStepText, diagramLabelsText, diagramItemsText, problemText, stepsText, drawText, themeText, orientationText, trapText, trickText, rememberText, gsThemeText, cameraText, labelsText, effectsText, captionText, sourceTsText, badgeText, chapterText, noteText, notesText, notesTitleText, sceneText, sceneTitleText, sceneItemsText, chapterCardText, ...rest } = row;
+    void themeText; void orientationText; void trapText; void trickText; void rememberText;
     void gsThemeText; void cameraText; void labelsText; void effectsText; void captionText; void sourceTsText; void badgeText; void chapterText; void noteText; void notesText; void notesTitleText; void sceneText; void sceneTitleText; void sceneItemsText; void chapterCardText;
     const atlas: AtlasSpec | undefined = retainedGsTheme === "atlas"
       ? { scene: retainedScene, sceneTitle: retainedSceneTitle[0], sceneSubtitle: retainedSceneTitle[1], items: retainedSceneItems, chapterCard: chapterCard ? { title: chapterCard[0], question: chapterCard[1] } : null, headline: retainedQuestionText.trim() }
@@ -508,7 +521,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     void diagramItemsText;
     const diagramItems = (row.layout === "diagram" && isInfographic(diagram)) || row.layout === "solution" ? retainedDiagramItems : [];
     const diagramLabels = row.layout === "diagram" ? retainedDiagramLabels : "hi";
-    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveProblem, effectiveSteps, solutionDrawn, effectiveTheme: retainedTheme, effectiveTrap: solution ? retainedNotes.trap : "", effectiveTrick: solution ? retainedNotes.trick : "", effectiveRemember: solution ? retainedNotes.remember : "", gsTheme: retainedGsTheme, journey, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
+    return { ...rest, diagram, diagramStep, diagramLabels, diagramItems, effectiveProblem, effectiveSteps, solutionDrawn, effectiveTheme: retainedTheme, effectiveOrientation: orientation, effectiveTrap: solution ? retainedNotes.trap : "", effectiveTrick: solution ? retainedNotes.trick : "", effectiveRemember: solution ? retainedNotes.remember : "", gsTheme: retainedGsTheme, journey, effectiveBoard: retainedBoard, effectiveQuestionText: retainedQuestionText, effectiveOptions: retainedOptions, effectiveWorking: retainedWorking, effectiveResult: retainedResult, generatedTime, generatedTimeLabel: formatPedagogyTime(generatedTime) } satisfies PedagogyRow;
   });
 }
 

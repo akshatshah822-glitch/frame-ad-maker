@@ -371,8 +371,8 @@ export function solutionSlideSvg(state: SolutionSlideState, progress = 1) {
   </svg>`;
 }
 
-export async function createSolutionSlide(state: SolutionSlideState, progress = 1) {
-  return sharp(Buffer.from(solutionSlideSvg(state, progress))).png().toBuffer();
+export async function createSolutionSlide(state: SolutionSlideState, progress = 1, portrait = false) {
+  return sharp(Buffer.from(portrait ? solutionSlideSvgPortrait(state, progress) : solutionSlideSvg(state, progress))).png().toBuffer();
 }
 
 /** Drawing runs at 16 frames a second: about 1 s per newly drawn item, at most 2 s per row. */
@@ -380,4 +380,78 @@ export const SOLUTION_FRAME_SECONDS = 1 / 16;
 export function solutionAnimationFrames(newItems: number, newCard: boolean) {
   if (!newItems && !newCard) return 0;
   return Math.min(32, Math.max(10, newItems * 14));
+}
+
+// Portrait (1080 × 1920, Oct 30 2026): title and problem on top, the trick diagram (drawn by the landscape code and
+// scaled to the phone width), then the step cards stacked full width. The landscape slide above is unchanged.
+const PW = 1080, PH = 1920, PS = 64, PR = PW - PS;
+
+export function solutionSlideSvgPortrait(state: SolutionSlideState, progress = 1) {
+  const reveal = ease(state.drawn > state.drawnBefore ? (progress - 0.6) / 0.4 : progress);
+  const pill = [state.chapter, state.questionId].filter((part) => part.trim()).join(" · ").toUpperCase();
+  const pillWidth = Math.min(PR - PS - 150, pill.length * 26 * 0.68 + pill.length * 1.5 + 52);
+  const titleFit = fit(state.title, PR - PS, 2, 64, 44, true);
+  const emphasis = state.emphasis.trim();
+  const titleSvg = titleFit.lines.map((line, i) => textAt(emphasis && line.includes(emphasis)
+    ? line.split(emphasis).map((part) => esc(part)).join(`<tspan fill="${YELLOW}">${esc(emphasis)}</tspan>`) : esc(line), PS, 210 + i * titleFit.size * 1.15, titleFit.size, INK, { weight: 800 })).join("");
+  let y = 210 + (titleFit.lines.length - 1) * titleFit.size * 1.15 + 76;
+  const words = problemWords(state.problem);
+  const problem = fit(words.map((word) => word.text).join(" "), PR - PS, 6, 34, 26);
+  let cursor = 0;
+  const problemSvg = problem.lines.map((line, i) => {
+    const lineWords = words.slice(cursor, cursor + line.split(" ").length);
+    cursor += lineWords.length;
+    const groups: { red: boolean; text: string[] }[] = [];
+    for (const word of lineWords) {
+      const red = Boolean(word.mark && word.mark <= state.shown);
+      if (groups.length && groups[groups.length - 1].red === red) groups[groups.length - 1].text.push(word.text);
+      else groups.push({ red, text: [word.text] });
+    }
+    const content = groups.map((group) => group.red
+      ? `<tspan fill="${RED}" font-weight="700" text-decoration="underline">${esc(group.text.join(" "))}</tspan>` : esc(group.text.join(" "))).join(" ");
+    return textAt(content, PS, y + i * problem.size * 1.45, problem.size, SOFT);
+  }).join("");
+  y += Math.max(0, problem.lines.length - 1) * problem.size * 1.45 + 34;
+  // Options: one chip per row, full width.
+  const options = (state.options ?? []).map((option) => option.trim());
+  const listed = options.map((option, i) => ({ option, letter: LETTERS[i] })).filter((entry) => entry.option);
+  const answerShowing = state.steps.some((step, i) => step.answer && i < state.shown);
+  const correct = answerShowing ? answeredOption(state.steps) : "";
+  const optionsSvg = listed.map((entry, i) => {
+    const hit = entry.letter === correct, top = y + i * (OPTION_HEIGHT + 10);
+    return `<rect x="${PS}" y="${top.toFixed(1)}" width="${PR - PS}" height="${OPTION_HEIGHT}" rx="12" fill="${hit ? YELLOW : CARD}" stroke="${hit ? YELLOW : CARD_LINE}" stroke-width="2"/>`
+      + textAt(esc(`${entry.letter}. ${entry.option}`), PS + 22, top + OPTION_HEIGHT / 2 + OPTION_SIZE * 0.36, OPTION_SIZE + 2, hit ? "#111827" : INK, { weight: hit ? 700 : 400 });
+  }).join("");
+  if (listed.length) y += listed.length * (OPTION_HEIGHT + 10) + 14;
+  // Diagram: the landscape drawing area (x 120–1800) scaled to the phone width.
+  let diagramSvg = "";
+  if (state.diagram.kind !== "none") {
+    DIAGRAM_TOP = 372; DIAGRAM_HEIGHT = DIAGRAM_BOTTOM - DIAGRAM_TOP;
+    const vbX = 120, vbW = 1680, k = (PR - PS + 40) / vbW, h = DIAGRAM_HEIGHT * k;
+    diagramSvg = `<rect x="${PS - 20}" y="${y.toFixed(1)}" width="${PR - PS + 40}" height="${h.toFixed(1)}" rx="16" fill="#131d2e"/>`
+      + `<svg x="${PS - 20}" y="${y.toFixed(1)}" width="${PR - PS + 40}" height="${h.toFixed(1)}" viewBox="${vbX} ${DIAGRAM_TOP} ${vbW} ${DIAGRAM_HEIGHT}">${diagramMarkup(state.diagram, revealer(state.drawn, state.drawnBefore, progress))}</svg>`;
+    y += h + 30;
+  }
+  // Step cards stacked, full width; the newest rises in.
+  const room = PH - 90 - y, count = Math.max(1, state.steps.length);
+  const cardH = Math.max(110, Math.min(170, (room - (count - 1) * 18) / count));
+  let cards = "", stepNumber = 0;
+  for (const [i, step] of state.steps.entries()) {
+    if (!step.answer) stepNumber += 1;
+    if (i >= state.shown) continue;
+    const newest = i >= state.shownBefore && i === state.shown - 1;
+    const opacity = newest ? reveal : 1;
+    const top = y + i * (cardH + 18) + (newest ? (1 - reveal) * 24 : 0);
+    const text = fit(step.text, PR - PS - 60, cardH >= 150 ? 3 : 2, step.answer ? 36 : 32, 22, step.answer);
+    const lines = text.lines.map((line, k) => textAt(esc(line), PS + 30, top + 84 + k * text.size * 1.25, text.size, step.answer ? "#111827" : INK, { weight: step.answer ? 700 : 400 })).join("");
+    cards += `<g opacity="${opacity.toFixed(3)}"><rect x="${PS}" y="${top.toFixed(1)}" width="${PR - PS}" height="${cardH.toFixed(1)}" rx="16" fill="${step.answer ? YELLOW : CARD}" stroke="${step.answer ? YELLOW : CARD_LINE}" stroke-width="2"/>`
+      + textAt(step.answer ? "ANSWER" : `STEP ${stepNumber}`, PS + 30, top + 42, 20, step.answer ? "#6b5212" : MUTED, { weight: 700, spacing: 3 }) + `${lines}</g>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}" viewBox="0 0 ${PW} ${PH}">${arrowMarkers()}
+    <rect width="${PW}" height="${PH}" fill="${BG}"/>
+    ${pill ? `<rect x="${PS}" y="64" width="${pillWidth.toFixed(1)}" height="48" rx="24" fill="#1d3557"/>${textAt(esc(pill), PS + 24, 97, 26, "#8cc4ff", { spacing: 1.5 })}` : ""}
+    ${textAt(esc(state.timeLabel), PR, 98, 24, MUTED, { anchor: "end" })}
+    ${titleSvg}${problemSvg}${optionsSvg}${diagramSvg}${cards}
+    ${textAt("FRAME", PR, PH - 30, 20, "#4f5d75", { anchor: "end", spacing: 2 })}
+  </svg>`;
 }

@@ -153,6 +153,9 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const missingPictures = [...pictures].filter(([, image]) => !image).map(([file]) => file);
   if (pictures.size) console.info("Pedagogy look pictures", { pictures: pictures.size - missingPictures.length, path: missingPictures.length ? "missing-picture-placeholder" : "picture-files", missingPictures });
   if (lookRows.length) console.info("Pedagogy look slides", { rows: lookRows.length, logos: logos.size - missingLogos.length, path: missingLogos.length ? "logo-name-tiles" : "logo-files", missingLogos });
+  // orientation (Oct 30 2026): portrait draws the solution boards at 1080 × 1920; anything else stays landscape.
+  const portrait = timeline.rows.some((row) => row.effectiveOrientation === "portrait");
+  console.info("Pedagogy orientation", { path: portrait ? "portrait-1080x1920" : "landscape-1920x1080" });
   // gs_theme = journey: the whole video is one continuous 3D Earth (pedagogy-journey.ts); other sheets skip this.
   const journeyRows = timeline.rows.filter((row) => row.journey).length;
   const atlasRows = timeline.rows.filter((row) => row.journey?.atlas).length;
@@ -259,9 +262,9 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         const frames = animationSeconds ? Math.min(150, Math.max(8, Math.round(animationSeconds * 12))) : 1;
         if (newTopic) {
           const cardPath = `${framePrefix}-card.png`;
-          await writeFile(cardPath, await createBoardTrickCard(state));
+          await writeFile(cardPath, await createBoardTrickCard(state, portrait));
           concatLines.push(`file '${cardPath}'`, `duration ${cardSeconds.toFixed(6)}`);
-          const incoming = await createBoardSlide(state, 0);
+          const incoming = await createBoardSlide(state, 0, portrait);
           for (let frame = 1; frame <= TOPIC_TRANSITION_FRAMES; frame += 1) {
             const framePath = `${framePrefix}-t${String(frame).padStart(2, "0")}.png`;
             await writeFile(framePath, await crossfadeFrame(cardPath, incoming, frame / (TOPIC_TRANSITION_FRAMES + 1)));
@@ -273,7 +276,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         const frameSeconds = animationSeconds ? animationSeconds / frames : 0;
         for (let frame = 1; frame <= frames; frame += 1) {
           const framePath = `${framePrefix}-b${String(frame).padStart(3, "0")}.png`;
-          await writeFile(framePath, await createBoardSlide(state, animationSeconds ? frame / frames : 1));
+          await writeFile(framePath, await createBoardSlide(state, animationSeconds ? frame / frames : 1, portrait));
           const duration = frame === frames ? row.allocatedDuration - cardSeconds - fadeSeconds - animationSeconds + frameSeconds : frameSeconds;
           concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
           lastFrame = framePath;
@@ -289,7 +292,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         const newTopic = Boolean(lastFrame) && Boolean(previous) && previous.questionId !== row.questionId;
         const transitionSeconds = newTopic ? Math.min(TOPIC_TRANSITION_SECONDS, row.allocatedDuration * 0.2) : 0;
         if (newTopic) {
-          const incoming = await createSolutionSlide(state, 0);
+          const incoming = await createSolutionSlide(state, 0, portrait);
           for (let frame = 1; frame <= TOPIC_TRANSITION_FRAMES; frame += 1) {
             const framePath = `${framePrefix}-t${String(frame).padStart(2, "0")}.png`;
             await writeFile(framePath, await crossfadeFrame(lastFrame, incoming, frame / (TOPIC_TRANSITION_FRAMES + 1)));
@@ -299,7 +302,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         }
         for (let frame = 1; frame <= frames; frame += 1) {
           const framePath = `${framePrefix}-s${String(frame).padStart(2, "0")}.png`;
-          await writeFile(framePath, await createSolutionSlide(state, frame / frames));
+          await writeFile(framePath, await createSolutionSlide(state, frame / frames, portrait));
           const duration = frame === frames ? row.allocatedDuration - animationSeconds - transitionSeconds + frameSeconds : frameSeconds;
           concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
           lastFrame = framePath;
@@ -366,7 +369,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     "-filter_complex", `[0:v]fps=24,format=yuv420p,setsar=1[outv];${audioFilters.join(";")};${audioInputs}amix=inputs=${rows.length}:duration=longest:normalize=0,atrim=duration=${totalDuration.toFixed(6)}[outa]`,
     "-map", "[outv]", "-map", "[outa]", "-t", totalDuration.toFixed(6), "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-r", "24", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", outputPath,
   ]);
-  const qa = await probeFinalVideo(outputPath, { width: 1920, height: 1080, duration: totalDuration });
+  const qa = await probeFinalVideo(outputPath, { width: portrait ? 1080 : 1920, height: portrait ? 1920 : 1080, duration: totalDuration });
   if (!qa.passed) throw new Error(`Pedagogy video technical QA failed: ${JSON.stringify(qa)}`);
   return { outputPath, qa: { ...qa, renderSource: "code", narrationDurations, timingAudit: timeline.audit, warningCount: warningMessages.length } };
 }
