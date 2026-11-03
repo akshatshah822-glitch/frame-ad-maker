@@ -14,8 +14,10 @@ export type PageState = { file: string; box: PageBox; caption: string };
 const WIDTH = 1920;
 const HEIGHT = 1080;
 /** Space kept clear at the bottom for the caption band, and the margin around the framed part. */
-const CAPTION_BAND = 150;
+const CAPTION_BAND = 190;
 const MARGIN = 40;
+/** Padding (screen pixels) shown around the framed part of the page. */
+const PAD = 22;
 const FPS = 12;
 const TRANSITION_SECONDS = 1.2;
 const FONT = "Inter, 'Noto Sans', Arial, sans-serif";
@@ -53,29 +55,77 @@ export function pageCamera(page: { width: number; height: number }, box: PageBox
 
 const mixBox = (a: PageBox, b: PageBox, t: number): PageBox => [0, 1, 2, 3].map((i) => a[i] + (b[i] - a[i]) * t) as PageBox;
 
-/** The page drawn at a camera, cut to the frame, as a composite layer. */
-async function pageLayer(page: PagePicture, camera: { scale: number; x: number; y: number }, shiftX = 0) {
-  const left = camera.x + shiftX;
-  const top = camera.y;
-  const shownW = page.width * camera.scale;
-  const shownH = page.height * camera.scale;
+/** The framed part of the page (the box, plus a little padding), drawn at a camera as a rounded card with a shadow.
+ * Only the box is shown, so no line of the page is ever cut half-way at the edge of the view. */
+async function pageLayer(page: PagePicture, camera: { scale: number; x: number; y: number }, box: PageBox, shiftX = 0) {
+  const pad = PAD / camera.scale;
+  const px0 = clamp(box[0] * page.width - pad, 0, page.width), py0 = clamp(box[1] * page.height - pad, 0, page.height);
+  const px1 = clamp(box[2] * page.width + pad, 0, page.width), py1 = clamp(box[3] * page.height + pad, 0, page.height);
+  const left = camera.x + shiftX + px0 * camera.scale, top = camera.y + py0 * camera.scale;
+  const shownW = (px1 - px0) * camera.scale, shownH = (py1 - py0) * camera.scale;
   const x0 = Math.max(0, left), y0 = Math.max(0, top);
   const x1 = Math.min(WIDTH, left + shownW), y1 = Math.min(HEIGHT, top + shownH);
-  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
-  const sx = (x0 - left) / camera.scale, sy = (y0 - top) / camera.scale;
+  if (x1 - x0 < 2 || y1 - y0 < 2) return [];
+  const sx = px0 + (x0 - left) / camera.scale, sy = py0 + (y0 - top) / camera.scale;
   const sw = (x1 - x0) / camera.scale, sh = (y1 - y0) / camera.scale;
   const region = { left: Math.floor(clamp(sx, 0, page.width - 1)), top: Math.floor(clamp(sy, 0, page.height - 1)), width: 0, height: 0 };
   region.width = Math.max(1, Math.min(page.width - region.left, Math.ceil(sw)));
   region.height = Math.max(1, Math.min(page.height - region.top, Math.ceil(sh)));
-  const input = await sharp(page.full).extract(region).resize(Math.round(x1 - x0), Math.round(y1 - y0), { fit: "fill" }).png().toBuffer();
-  return { input, left: Math.round(x0), top: Math.round(y0) };
+  const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+  const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" rx="18" fill="#fff"/></svg>`);
+  const input = await sharp(page.full).extract(region).resize(w, h, { fit: "fill" }).composite([{ input: mask, blend: "dest-in" }]).png().toBuffer();
+  const shadow = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><defs><filter id="s" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="18"/></filter></defs><rect x="${Math.round(x0) + 6}" y="${Math.round(y0) + 14}" width="${w}" height="${h}" rx="18" fill="#000" fill-opacity="0.55" filter="url(#s)"/></svg>`);
+  return [{ input: shadow, left: 0, top: 0 }, { input, left: Math.round(x0), top: Math.round(y0) }];
 }
 
-function captionSvg(caption: string, opacity: number) {
+const widths = new Map<string, number>();
+/** The drawn width of a piece of text (rendered once and trimmed), so highlight markers sit exactly under the words. */
+export async function textWidth(text: string, size: number, weight: number) {
+  const key = `${size}|${weight}|${text}`;
+  const known = widths.get(key);
+  if (known !== undefined) return known;
+  let width = 0;
+  if (text.trim()) {
+    const probe = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(text.length * size + 200)}" height="${size * 2}"><rect width="100%" height="100%" fill="#fff"/><text x="0" y="${size * 1.4}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" xml:space="preserve">|${escapeXml(text)}|</text></svg>`;
+    const bar = `<svg xmlns="http://www.w3.org/2000/svg" width="${size * 4}" height="${size * 2}"><rect width="100%" height="100%" fill="#fff"/><text x="0" y="${size * 1.4}" font-family="${FONT}" font-size="${size}" font-weight="${weight}">||</text></svg>`;
+    const full = (await sharp(Buffer.from(probe)).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true })).info.width;
+    const bars = (await sharp(Buffer.from(bar)).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true })).info.width;
+    width = Math.max(0, full - bars);
+  }
+  widths.set(key, width);
+  return width;
+}
+
+/** Text runs drawn left to right with *starred* runs on a highlighter mark; returns the SVG. */
+async function markedText(text: string, x: number, baseline: number, size: number, colors: { plain: string; mark: string; marker: string; markerOpacity: number }, weights = { plain: 700, mark: 800 }) {
+  let cursor = x;
+  const marks: string[] = [];
+  const spans: string[] = [];
+  for (const run of keyPointRuns(text)) {
+    const weight = run.mark ? weights.mark : weights.plain;
+    const width = await textWidth(run.text, size, weight);
+    // The marker covers the whole height of the words, so dark highlighted text never sits on the dark band.
+    if (run.mark) marks.push(`<rect x="${(cursor - 8).toFixed(1)}" y="${(baseline - size * 0.86).toFixed(1)}" width="${(width + 16).toFixed(1)}" height="${(size * 1.12).toFixed(1)}" rx="8" fill="${colors.marker}" fill-opacity="${colors.markerOpacity}"/>`);
+    spans.push(`<text x="${cursor.toFixed(1)}" y="${baseline}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="${run.mark ? colors.mark : colors.plain}" xml:space="preserve">${escapeXml(run.text)}</text>`);
+    cursor += width;
+  }
+  return marks.join("") + spans.join("");
+}
+
+/** "*starred*" words of a key point, split into plain and highlighted runs. */
+export function keyPointRuns(text: string) {
+  return text.split("*").map((part, index) => ({ text: part, mark: index % 2 === 1 })).filter((run) => run.text);
+}
+
+/** The bottom band: a KEY POINT label and the row's point, its *starred* words highlighted. */
+async function captionSvg(caption: string, opacity: number) {
   const text = caption.trim();
-  const band = `<rect x="0" y="${HEIGHT - CAPTION_BAND}" width="${WIDTH}" height="${CAPTION_BAND}" fill="#0b1020" fill-opacity="0.78"/>`;
-  const line = text ? `<rect x="80" y="${HEIGHT - CAPTION_BAND / 2 - 26}" width="8" height="52" rx="4" fill="#ffd166"/><text x="110" y="${HEIGHT - CAPTION_BAND / 2 + 16}" font-family="${FONT}" font-size="46" font-weight="700" fill="#f4f6fb" opacity="${opacity.toFixed(3)}">${escapeXml(text)}</text>` : "";
-  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${band}${line}</svg>`);
+  const band = `<rect x="0" y="${HEIGHT - CAPTION_BAND}" width="${WIDTH}" height="${CAPTION_BAND}" fill="#0b1020" fill-opacity="0.88"/>`;
+  if (!text) return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${band}</svg>`);
+  const size = text.replaceAll("*", "").length > 48 ? 46 : 54;
+  const label = `<rect x="80" y="${HEIGHT - CAPTION_BAND + 22}" width="170" height="38" rx="19" fill="#ffd166"/><text x="165" y="${HEIGHT - CAPTION_BAND + 48}" text-anchor="middle" font-family="${FONT}" font-size="22" font-weight="800" letter-spacing="2" fill="#0b1020">KEY POINT</text>`;
+  const line = await markedText(text, 84, HEIGHT - 34, size, { plain: "#f4f6fb", mark: "#0b1020", marker: "#ffd166", markerOpacity: 1 });
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${band}<g opacity="${opacity.toFixed(3)}">${label}${line}</g></svg>`);
 }
 
 /** One frame. `previous` (another page sliding out) is only set while a new page comes in. */
@@ -83,18 +133,16 @@ export async function pageFrame(pages: Map<string, PagePicture | null>, state: P
   const page = pages.get(state.file);
   if (!page) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><rect width="100%" height="100%" fill="#0b1020"/><text x="960" y="520" text-anchor="middle" font-family="${FONT}" font-size="40" fill="#8a96ad">Missing page: ${escapeXml(state.file)}</text></svg>`;
-    return sharp(Buffer.from(svg)).composite([{ input: captionSvg(state.caption, 1) }]).png().toBuffer();
+    return sharp(Buffer.from(svg)).composite([{ input: await captionSvg(state.caption, 1) }]).png().toBuffer();
   }
   const layers: OverlayOptions[] = [];
   const t = slide ? easeInOut(slide.t) : 1;
   const outgoing = slide ? pages.get(slide.previous.file) : null;
   if (slide && outgoing) {
-    const layer = await pageLayer(outgoing, pageCamera(outgoing, slide.previous.box), -t * WIDTH);
-    if (layer) layers.push(layer);
+    layers.push(...await pageLayer(outgoing, pageCamera(outgoing, slide.previous.box), slide.previous.box, -t * WIDTH));
   }
-  const incoming = await pageLayer(page, pageCamera(page, box), slide ? (1 - t) * WIDTH : 0);
-  if (incoming) layers.push(incoming);
-  layers.push({ input: captionSvg(state.caption, captionOpacity), left: 0, top: 0 });
+  layers.push(...await pageLayer(page, pageCamera(page, box), box, slide ? (1 - t) * WIDTH : 0));
+  layers.push({ input: await captionSvg(state.caption, captionOpacity), left: 0, top: 0 });
   return sharp(page.blurred).composite(layers).png().toBuffer();
 }
 
@@ -120,5 +168,42 @@ export async function createPageFrames(pages: Map<string, PagePicture | null>, s
   }
   const held = Math.max(1 / FPS, allocatedDuration - frames.length / FPS);
   frames.push({ png: await pageFrame(pages, state, state.box, 1), duration: held });
+  return frames;
+}
+
+/** Recap board (visual = keypoints): a notebook card over the last page's blurred background; points appear one by one. */
+export async function keyPointsFrame(background: PagePicture | null | undefined, title: string, points: string[], shown: number) {
+  const cardX = 140, cardY = 50, cardW = WIDTH - 280, cardH = HEIGHT - 100;
+  const top = cardY + 250;
+  const step = Math.min(118, (cardY + cardH - 70 - top) / Math.max(1, points.length - 1));
+  const size = points.some((point) => point.replaceAll("*", "").length > 50) ? 42 : 46;
+  const rows: string[] = [];
+  for (const [index, point] of points.entries()) {
+    const opacity = clamp(shown - index);
+    if (opacity <= 0) continue;
+    const y = top + index * step;
+    const text = await markedText(point, cardX + 160, y, size, { plain: "#1d2433", mark: "#1d2433", marker: "#ffd166", markerOpacity: 0.85 }, { plain: 600, mark: 800 });
+    rows.push(`<g opacity="${opacity.toFixed(3)}"><circle cx="${cardX + 112}" cy="${y - size * 0.34}" r="20" fill="#2e7d4f"/><path d="M${cardX + 102} ${y - size * 0.34} l8 8 l14 -16" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>${text}</g>`);
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">
+    <defs><filter id="s" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="20"/></filter></defs>
+    <rect x="${cardX + 8}" y="${cardY + 18}" width="${cardW}" height="${cardH}" rx="26" fill="#000" fill-opacity="0.55" filter="url(#s)"/>
+    <rect x="${cardX}" y="${cardY}" width="${cardW}" height="${cardH}" rx="26" fill="#fbf7ec"/>
+    <rect x="${cardX + 66}" y="${cardY}" width="3" height="${cardH}" fill="#e8a0a0" fill-opacity="0.7"/>
+    <rect x="${cardX + 96}" y="${cardY + 44}" width="200" height="42" rx="21" fill="#ffd166"/>
+    <text x="${cardX + 196}" y="${cardY + 72}" text-anchor="middle" font-family="${FONT}" font-size="23" font-weight="800" letter-spacing="2" fill="#0b1020">REMEMBER</text>
+    <text x="${cardX + 96}" y="${cardY + 160}" font-family="${FONT}" font-size="60" font-weight="800" fill="#0b1020">${escapeXml(title)}</text>
+    ${rows.join("")}</svg>`;
+  const base = background ? sharp(background.blurred) : sharp({ create: { width: WIDTH, height: HEIGHT, channels: 3, background: "#0b1020" } });
+  return base.composite([{ input: Buffer.from(svg), left: 0, top: 0 }]).png().toBuffer();
+}
+
+/** All frames of a recap row: the points appear one by one over at most 60% of the line, then the full board holds. */
+export async function createKeyPointsFrames(background: PagePicture | null | undefined, title: string, points: string[], allocatedDuration: number) {
+  const seconds = Math.min(points.length * 0.6, allocatedDuration * 0.6);
+  const count = Math.max(1, Math.round(seconds * FPS));
+  const frames: { png: Buffer; duration: number }[] = [];
+  for (let index = 0; index < count; index += 1) frames.push({ png: await keyPointsFrame(background, title, points, ((index + 1) / count) * points.length), duration: 1 / FPS });
+  frames.push({ png: await keyPointsFrame(background, title, points, points.length), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
   return frames;
 }

@@ -1,7 +1,7 @@
 // Optional visual boards for the exam-question (pedagogy) path only.
 // A row with no `visual` column, or `visual` = "text", keeps the original text board unchanged.
 
-export const pedagogyVisualKinds = ["text", "flowchart", "cards", "bar", "line", "waterfall", "counter", "logo", "picture", "page"] as const;
+export const pedagogyVisualKinds = ["text", "flowchart", "cards", "bar", "line", "waterfall", "counter", "logo", "picture", "page", "keypoints"] as const;
 export type PedagogyVisualKind = typeof pedagogyVisualKinds[number];
 
 export type PedagogyNumber = { prefix: string; value: number; suffix: string; decimals: number };
@@ -17,7 +17,9 @@ export type PedagogyVisual =
   | { kind: "logo"; names: string[] }
   | { kind: "picture"; file: string; caption: string; credit: string }
   /** A whole booklet page (flipbook style): the camera frames `box` (fractions of the page, x0,y0,x1,y1). */
-  | { kind: "page"; file: string; box: [number, number, number, number]; caption: string };
+  | { kind: "page"; file: string; box: [number, number, number, number]; caption: string }
+  /** A recap board in the flipbook look: a title and 2 to 7 points, *starred* words highlighted. */
+  | { kind: "keypoints"; title: string; points: string[] };
 
 export class PedagogyVisualParseError extends Error {
   constructor(message: string) {
@@ -109,10 +111,18 @@ export function parsePedagogyVisual(kindValue: unknown, dataValue: unknown): Ped
     if (boxText) {
       const parts = boxText.split(",").map((part) => Number(part.trim()));
       if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value) || value < 0 || value > 1)) fail(`page box ${JSON.stringify(boxText)} must be four numbers from 0 to 1: x0, y0, x1, y1.`);
-      if (parts[2] - parts[0] < 0.05 || parts[3] - parts[1] < 0.05) fail(`page box ${JSON.stringify(boxText)} must have x1 > x0 and y1 > y0.`);
+      if (parts[2] - parts[0] < 0.02 || parts[3] - parts[1] < 0.02) fail(`page box ${JSON.stringify(boxText)} must have x1 > x0 and y1 > y0.`);
       box = parts as [number, number, number, number];
     }
     return { kind, file, box, caption };
+  }
+  if (kind === "keypoints") {
+    // "Title = point | point | …"
+    const [title, list = "", ...extra] = data.split("=").map((part) => part.trim());
+    if (extra.length || !title) fail(`keypoints must be "Title = point | point | …" (got ${JSON.stringify(data)}).`);
+    const points = items(list, /\|/);
+    count("keypoints", points, 2, 7);
+    return { kind, title, points };
   }
   const names = items(data, /,/).map((name) => name.toLowerCase());
   count("logo", names, 1, 8);
@@ -129,6 +139,7 @@ export function pedagogyVisualLabels(visual: PedagogyVisual): string[] {
   if (visual.kind === "bar" || visual.kind === "line") return visual.points.map((point) => point.label);
   if (visual.kind === "logo") return visual.names;
   if (visual.kind === "picture" || visual.kind === "page") return [visual.caption];
+  if (visual.kind === "keypoints") return [visual.title, ...visual.points];
   return [];
 }
 

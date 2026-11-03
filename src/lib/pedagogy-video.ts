@@ -14,7 +14,7 @@ import { probeFinalVideo } from "@/lib/video-qa";
 import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } from "@/lib/pedagogy-transition";
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
 import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
-import { createPageFrames, loadPagePictures, type PageState } from "@/lib/pedagogy-page";
+import { createKeyPointsFrames, createPageFrames, loadPagePictures, type PageState } from "@/lib/pedagogy-page";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, solutionDiagramFiles } from "@/lib/pedagogy-solution";
 import { loadPedagogyImage } from "@/lib/pedagogy-infographic";
 import { atlasSceneKey, openJourneyRenderer, planAtlasRow, planJourneyRow } from "@/lib/pedagogy-journey";
@@ -336,7 +336,17 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
       } else if (row.layout === "visual") {
         const previous = timeline.rows[index - 1];
         const visual = parsePedagogyVisual(row.visual, row.visualData);
-        if (visual.kind === "page") {
+        if (visual.kind === "keypoints") {
+          // The recap board sits on the blurred background of the last page shown before it.
+          const lastPage = timeline.rows.slice(0, index).reverse().map((r) => r.layout === "visual" ? parsePedagogyVisual(r.visual, r.visualData) : null).find((v) => v?.kind === "page");
+          const frames = await createKeyPointsFrames(lastPage?.kind === "page" ? pages.get(lastPage.file) : null, visual.title, visual.points, row.allocatedDuration);
+          for (const [frame, { png, duration }] of frames.entries()) {
+            const framePath = `${framePrefix}-k${String(frame).padStart(3, "0")}.png`;
+            await writeFile(framePath, png);
+            concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+            lastFrame = framePath;
+          }
+        } else if (visual.kind === "page") {
           const before = previous?.layout === "visual" ? parsePedagogyVisual(previous.visual, previous.visualData) : null;
           const from: PageState | null = before?.kind === "page" ? { file: before.file, box: before.box, caption: before.caption || previous!.board } : null;
           const frames = await createPageFrames(pages, { file: visual.file, box: visual.box, caption: visual.caption || row.board }, from, row.allocatedDuration);
