@@ -14,6 +14,7 @@ import { probeFinalVideo } from "@/lib/video-qa";
 import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } from "@/lib/pedagogy-transition";
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
 import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
+import { createPageFrames, loadPagePictures, type PageState } from "@/lib/pedagogy-page";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, solutionDiagramFiles } from "@/lib/pedagogy-solution";
 import { loadPedagogyImage } from "@/lib/pedagogy-infographic";
 import { atlasSceneKey, openJourneyRenderer, planAtlasRow, planJourneyRow } from "@/lib/pedagogy-journey";
@@ -153,6 +154,10 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const pictures = await loadLookPictures(lookRows.flatMap((row) => { const visual = parsePedagogyVisual(row.visual, row.visualData); return visual.kind === "picture" ? [visual.file] : []; }));
   const missingPictures = [...pictures].filter(([, image]) => !image).map(([file]) => file);
   if (pictures.size) console.info("Pedagogy look pictures", { pictures: pictures.size - missingPictures.length, path: missingPictures.length ? "missing-picture-placeholder" : "picture-files", missingPictures });
+  // visual = page (flipbook style, 3 Nov 2026): whole booklet pages; sheets without it load nothing here.
+  const pages = await loadPagePictures(lookRows.flatMap((row) => { const visual = parsePedagogyVisual(row.visual, row.visualData); return visual.kind === "page" ? [visual.file] : []; }));
+  const missingPages = [...pages].filter(([, page]) => !page).map(([file]) => file);
+  if (pages.size) console.info("Pedagogy page slides", { pages: pages.size - missingPages.length, path: missingPages.length ? "missing-page-placeholder" : "page-files", missingPages });
   if (lookRows.length) console.info("Pedagogy look slides", { rows: lookRows.length, logos: logos.size - missingLogos.length, path: missingLogos.length ? "logo-name-tiles" : "logo-files", missingLogos });
   // orientation (Oct 30 2026): portrait draws the solution boards at 1080 × 1920; anything else stays landscape.
   const portrait = timeline.rows.some((row) => row.effectiveOrientation === "portrait");
@@ -331,14 +336,26 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
       } else if (row.layout === "visual") {
         const previous = timeline.rows[index - 1];
         const visual = parsePedagogyVisual(row.visual, row.visualData);
-        const holds = visual.kind !== "text" && previous?.layout === "visual" && previous.visual === row.visual && previous.visualData === row.visualData && previous.questionId === row.questionId;
-        const look = { questionId: row.questionId, title: visual.kind === "text" ? "" : row.board, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, visual, logos, pictures };
-        const frames = holds ? [{ png: await createLookSlide(look, 1), duration: row.allocatedDuration }] : await createLookFrames(look, row.allocatedDuration);
-        for (const [frame, { png, duration }] of frames.entries()) {
-          const framePath = `${framePrefix}-v${String(frame).padStart(3, "0")}.png`;
-          await writeFile(framePath, png);
-          concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
-          lastFrame = framePath;
+        if (visual.kind === "page") {
+          const before = previous?.layout === "visual" ? parsePedagogyVisual(previous.visual, previous.visualData) : null;
+          const from: PageState | null = before?.kind === "page" ? { file: before.file, box: before.box, caption: before.caption || previous!.board } : null;
+          const frames = await createPageFrames(pages, { file: visual.file, box: visual.box, caption: visual.caption || row.board }, from, row.allocatedDuration);
+          for (const [frame, { png, duration }] of frames.entries()) {
+            const framePath = `${framePrefix}-p${String(frame).padStart(3, "0")}.png`;
+            await writeFile(framePath, png);
+            concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+            lastFrame = framePath;
+          }
+        } else {
+          const holds = visual.kind !== "text" && previous?.layout === "visual" && previous.visual === row.visual && previous.visualData === row.visualData && previous.questionId === row.questionId;
+          const look = { questionId: row.questionId, title: visual.kind === "text" ? "" : row.board, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, visual, logos, pictures };
+          const frames = holds ? [{ png: await createLookSlide(look, 1), duration: row.allocatedDuration }] : await createLookFrames(look, row.allocatedDuration);
+          for (const [frame, { png, duration }] of frames.entries()) {
+            const framePath = `${framePrefix}-v${String(frame).padStart(3, "0")}.png`;
+            await writeFile(framePath, png);
+            concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+            lastFrame = framePath;
+          }
         }
       } else if (row.layout === "trick") {
         const previous = timeline.rows[index - 1];

@@ -1,7 +1,7 @@
 // Optional visual boards for the exam-question (pedagogy) path only.
 // A row with no `visual` column, or `visual` = "text", keeps the original text board unchanged.
 
-export const pedagogyVisualKinds = ["text", "flowchart", "cards", "bar", "line", "waterfall", "counter", "logo", "picture"] as const;
+export const pedagogyVisualKinds = ["text", "flowchart", "cards", "bar", "line", "waterfall", "counter", "logo", "picture", "page"] as const;
 export type PedagogyVisualKind = typeof pedagogyVisualKinds[number];
 
 export type PedagogyNumber = { prefix: string; value: number; suffix: string; decimals: number };
@@ -15,7 +15,9 @@ export type PedagogyVisual =
   | { kind: "bar" | "line" | "waterfall"; points: PedagogyDataPoint[] }
   | { kind: "counter"; amount: PedagogyNumber }
   | { kind: "logo"; names: string[] }
-  | { kind: "picture"; file: string; caption: string; credit: string };
+  | { kind: "picture"; file: string; caption: string; credit: string }
+  /** A whole booklet page (flipbook style): the camera frames `box` (fractions of the page, x0,y0,x1,y1). */
+  | { kind: "page"; file: string; box: [number, number, number, number]; caption: string };
 
 export class PedagogyVisualParseError extends Error {
   constructor(message: string) {
@@ -97,6 +99,21 @@ export function parsePedagogyVisual(kindValue: unknown, dataValue: unknown): Ped
     if (!/^[\w.-]+\.(?:jpe?g|png|webp)$/i.test(file)) fail(`picture ${JSON.stringify(file)} must be an image file name like photo.jpg.`);
     return { kind, file, caption, credit };
   }
+  if (kind === "page") {
+    // "page06.jpg = x0, y0, x1, y1 = caption": the page lives in the pedagogy-images folder; the box (fractions of the
+    // page width and height, 0 to 1) is the part being read, and is optional (blank = the whole page).
+    const [file, boxText = "", caption = "", ...extra] = data.split("=").map((part) => part.trim());
+    if (extra.length) fail(`page must be "file.jpg = x0, y0, x1, y1 = caption" (got ${JSON.stringify(data)}).`);
+    if (!/^[\w.-]+\.(?:jpe?g|png|webp)$/i.test(file)) fail(`page ${JSON.stringify(file)} must be an image file name like page06.jpg.`);
+    let box: [number, number, number, number] = [0, 0, 1, 1];
+    if (boxText) {
+      const parts = boxText.split(",").map((part) => Number(part.trim()));
+      if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value) || value < 0 || value > 1)) fail(`page box ${JSON.stringify(boxText)} must be four numbers from 0 to 1: x0, y0, x1, y1.`);
+      if (parts[2] - parts[0] < 0.05 || parts[3] - parts[1] < 0.05) fail(`page box ${JSON.stringify(boxText)} must have x1 > x0 and y1 > y0.`);
+      box = parts as [number, number, number, number];
+    }
+    return { kind, file, box, caption };
+  }
   const names = items(data, /,/).map((name) => name.toLowerCase());
   count("logo", names, 1, 8);
   const invalid = names.find((name) => !/^[a-z0-9][a-z0-9-]*$/.test(name));
@@ -111,7 +128,7 @@ export function pedagogyVisualLabels(visual: PedagogyVisual): string[] {
   if (visual.kind === "waterfall") return [...visual.points.map((point) => point.label), "Net"];
   if (visual.kind === "bar" || visual.kind === "line") return visual.points.map((point) => point.label);
   if (visual.kind === "logo") return visual.names;
-  if (visual.kind === "picture") return [visual.caption];
+  if (visual.kind === "picture" || visual.kind === "page") return [visual.caption];
   return [];
 }
 
