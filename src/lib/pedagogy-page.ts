@@ -150,15 +150,15 @@ function computeViews(page: { width: number; height: number; ink?: PageInk }, bo
     if (ink) {
       let bestCost = Infinity;
       const rowStep = 1 / ink.scale;
-      for (let k = 0; k <= 10; k += 1) {
+      for (let k = 0; k <= 40; k += 1) {
         const w = Math.min(page.width, fit * (1 + 0.04 * k)), safe = w / ratio;
         for (const x of steps(Math.max(0, x1 - w), Math.min(x0, page.width - w), 7)) {
           const rows = rowInk(x, w);
-          const side = colCut(ink, x, y0, y1) + colCut(ink, x + w, y0, y1);
           const lo = Math.max(0, y1 - safe), hi = Math.min(y0, Math.max(0, page.height - safe));
           for (let y = lo; y <= Math.max(lo, hi) + 1e-6; y += rowStep) {
-            const cut = edgeAt(rows, y) + edgeAt(rows, y + safe) + side;
-            const cost = cut + 0.004 * k + 0.001 * (Math.abs(x + w / 2 - cx) + Math.abs(y + safe / 2 - cy)) / safe;
+            // Side edges are checked over the whole visible height, not just the box.
+            const cut = edgeAt(rows, y) + edgeAt(rows, y + safe) + colCut(ink, x, y, y + safe) + colCut(ink, x + w, y, y + safe);
+            const cost = 4 * cut + 0.004 * k + 0.001 * (Math.abs(x + w / 2 - cx) + Math.abs(y + safe / 2 - cy)) / safe;
             if (cost < bestCost) { bestCost = cost; best = { x, y, w }; }
           }
         }
