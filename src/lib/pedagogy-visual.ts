@@ -1,7 +1,7 @@
 // Optional visual boards for the exam-question (pedagogy) path only.
 // A row with no `visual` column, or `visual` = "text", keeps the original text board unchanged.
 
-export const pedagogyVisualKinds = ["text", "flowchart", "cards", "bar", "line", "waterfall", "counter", "logo", "picture", "page", "keypoints"] as const;
+export const pedagogyVisualKinds = ["text", "flowchart", "cards", "bar", "line", "waterfall", "counter", "logo", "picture", "page", "keypoints", "chapter"] as const;
 export type PedagogyVisualKind = typeof pedagogyVisualKinds[number];
 
 export type PedagogyNumber = { prefix: string; value: number; suffix: string; decimals: number };
@@ -19,7 +19,9 @@ export type PedagogyVisual =
   /** A whole booklet page (flipbook style): the camera frames `box` (fractions of the page, x0,y0,x1,y1). */
   | { kind: "page"; file: string; box: [number, number, number, number]; caption: string }
   /** A recap board in the flipbook look: a title and 2 to 7 points, *starred* words highlighted. */
-  | { kind: "keypoints"; title: string; points: string[] };
+  | { kind: "keypoints"; title: string; points: string[] }
+  /** A chapter title card in the flipbook look: "2/6 = title = page.jpg" (the page, optional, is the blurred background). */
+  | { kind: "chapter"; number: number; total: number; title: string; file: string };
 
 export class PedagogyVisualParseError extends Error {
   constructor(message: string) {
@@ -124,6 +126,15 @@ export function parsePedagogyVisual(kindValue: unknown, dataValue: unknown): Ped
     count("keypoints", points, 2, 7);
     return { kind, title, points };
   }
+  if (kind === "chapter") {
+    const [order = "", title = "", file = "", ...extra] = data.split("=").map((part) => part.trim());
+    const match = /^(\d+)\s*\/\s*(\d+)$/.exec(order);
+    if (extra.length || !match || !title) fail(`chapter must be "2/6 = title = page.jpg" (got ${JSON.stringify(data)}).`);
+    const number = Number(match![1]), total = Number(match![2]);
+    if (number < 1 || total < number || total > 12) fail(`chapter ${JSON.stringify(order)} must be like 2/6 (at most 12 chapters).`);
+    if (file && !/^[\w.-]+\.(?:jpe?g|png|webp)$/i.test(file)) fail(`chapter page ${JSON.stringify(file)} must be an image file name like page06.jpg.`);
+    return { kind, number, total, title, file };
+  }
   const names = items(data, /,/).map((name) => name.toLowerCase());
   count("logo", names, 1, 8);
   const invalid = names.find((name) => !/^[a-z0-9][a-z0-9-]*$/.test(name));
@@ -140,6 +151,7 @@ export function pedagogyVisualLabels(visual: PedagogyVisual): string[] {
   if (visual.kind === "logo") return visual.names;
   if (visual.kind === "picture" || visual.kind === "page") return [visual.caption];
   if (visual.kind === "keypoints") return [visual.title, ...visual.points];
+  if (visual.kind === "chapter") return [visual.title];
   return [];
 }
 

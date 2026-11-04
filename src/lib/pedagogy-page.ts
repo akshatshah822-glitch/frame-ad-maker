@@ -31,7 +31,7 @@ const GUJARATI = /[\u0A80-\u0AFF]/;
 const label = (text: string, english: string, gujarati: string) => (GUJARATI.test(text) ? gujarati : english);
 /** Where a row sits in the whole video (0–1), for the progress bar. */
 export type PageProgress = { from: number; to: number };
-export type PageFrameOptions = { sweep?: number; progress?: number };
+export type PageFrameOptions = { sweep?: number; spotlight?: number; progress?: number };
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
@@ -81,19 +81,35 @@ export function pageViews(page: { width: number; height: number }, box: PageBox)
   return { start: { x: 0, y: y0, w }, end: { x: 0, y: Math.max(y0, y1 - safe), w }, pan: true };
 }
 
+/** The box (plus padding) on screen for a view, for the spotlight. */
+function boxOnScreen(page: { width: number; height: number }, view: PageView, box: PageBox) {
+  const scale = WIDTH / view.w, pad = page.width * BOX_PAD;
+  return { x0: (box[0] * page.width - pad - view.x) * scale, y0: (box[1] * page.height - pad - view.y) * scale, x1: (box[2] * page.width + pad - view.x) * scale, y1: (box[3] * page.height + pad - view.y) * scale };
+}
+
+/** Spotlight on the part being read: the rest of the page dims a little and a highlighter line frames the box. */
+function spotlightSvg(rect: { x0: number; y0: number; x1: number; y1: number }, strength: number) {
+  const x0 = Math.max(-20, rect.x0), y0 = Math.max(-20, rect.y0), x1 = Math.min(WIDTH + 20, rect.x1), y1 = Math.min(HEIGHT + 20, rect.y1);
+  if (strength <= 0 || x1 - x0 < 4 || y1 - y0 < 4) return null;
+  const hole = `M${x0.toFixed(1)} ${y0.toFixed(1)}h${(x1 - x0).toFixed(1)}v${(y1 - y0).toFixed(1)}h${(x0 - x1).toFixed(1)}z`;
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><path d="M0 0H${WIDTH}V${HEIGHT}H0z ${hole}" fill="#05070d" fill-opacity="${(0.42 * strength).toFixed(3)}" fill-rule="evenodd"/><rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${(x1 - x0).toFixed(1)}" height="${(y1 - y0).toFixed(1)}" rx="14" fill="none" stroke="#ffd166" stroke-width="6" stroke-opacity="${(0.95 * strength).toFixed(3)}"/></svg>`);
+}
+
 /** The page seen through a view, filling the screen; anything beyond the page edge shows the blurred page behind. */
-async function viewImage(page: PagePicture, view: PageView) {
+async function viewImage(page: PagePicture, view: PageView, box?: PageBox, spotlight = 0) {
   const scale = WIDTH / view.w, height = viewHeight(view);
   const px0 = clamp(view.x, 0, page.width), py0 = clamp(view.y, 0, page.height);
   const px1 = clamp(view.x + view.w, 0, page.width), py1 = clamp(view.y + height, 0, page.height);
   const left = Math.round((px0 - view.x) * scale), top = Math.round((py0 - view.y) * scale);
   const w = Math.min(WIDTH - left, Math.round((px1 - px0) * scale)), h = Math.min(HEIGHT - top, Math.round((py1 - py0) * scale));
-  if (w < 2 || h < 2) return sharp(page.blurred).png().toBuffer();
+  const light = box ? spotlightSvg(boxOnScreen(page, view, box), spotlight) : null;
+  const extra: OverlayOptions[] = light ? [{ input: light, left: 0, top: 0 }] : [];
+  if (w < 2 || h < 2) return sharp(page.blurred).composite(extra).png().toBuffer();
   const region = { left: Math.floor(px0), top: Math.floor(py0), width: 0, height: 0 };
   region.width = Math.max(1, Math.min(page.width - region.left, Math.ceil(px1 - px0)));
   region.height = Math.max(1, Math.min(page.height - region.top, Math.ceil(py1 - py0)));
   const input = await sharp(page.full).extract(region).resize(w, h, { fit: "fill" }).png().toBuffer();
-  return sharp(page.blurred).composite([{ input, left, top }]).png().toBuffer();
+  return sharp(page.blurred).composite([{ input, left, top }, ...extra]).png().toBuffer();
 }
 
 const widths = new Map<string, number>();
@@ -156,9 +172,15 @@ async function captionSvg(caption: string, opacity: number, sweep = 1) {
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${band}<g opacity="${opacity.toFixed(3)}">${pill}${line}</g></svg>`);
 }
 
-/** A thin bar along the top edge: how far into the video this frame is. */
+/** Progress as a running track along the top edge: 5 km marks, a finish flag, and a runner at how far the video is. */
 function progressBar(progress: number) {
-  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="8"><rect width="${WIDTH}" height="8" fill="#ffffff" fill-opacity="0.14"/><rect width="${(WIDTH * clamp(progress)).toFixed(1)}" height="8" fill="#ffd166"/></svg>`);
+  const h = 46, left = 70, right = WIDTH - 110, y = 30, p = clamp(progress);
+  const x = left + (right - left) * p;
+  const ticks = [1, 2, 3, 4].map((km) => { const tx = left + ((right - left) * km) / 5; return `<line x1="${tx}" y1="${y - 7}" x2="${tx}" y2="${y + 7}" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/><text x="${tx}" y="${y - 11}" text-anchor="middle" font-family="${FONT}" font-size="13" font-weight="700" fill="#ffffff" fill-opacity="0.7">${km}</text>`; }).join("");
+  // A simple runner: head, body leaning forward, arms and legs mid-stride.
+  const runner = `<g transform="translate(${x.toFixed(1)} ${y - 4})" stroke="#ffd166" stroke-width="4" stroke-linecap="round" fill="none"><circle cx="3" cy="-16" r="5" fill="#ffd166" stroke="none"/><path d="M1 -10 L-3 4"/><path d="M0 -7 L8 -2 M0 -7 L-8 -3"/><path d="M-3 4 L5 10 L3 16 M-3 4 L-9 12"/></g>`;
+  const flag = `<g transform="translate(${right + 18} ${y})"><line x1="0" y1="-16" x2="0" y2="12" stroke="#ffffff" stroke-width="3"/><path d="M0 -16 h22 v12 h-22z" fill="#ffffff"/><path d="M0 -16h5.5v6h-5.5zM11 -16h5.5v6h-5.5zM5.5 -10h5.5v6h-5.5zM16.5 -10h5.5v6h-5.5z" fill="#0b1020"/><text x="34" y="2" font-family="${FONT}" font-size="15" font-weight="800" fill="#ffffff">5 કિમી</text></g>`;
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${h + 12}"><rect width="${WIDTH}" height="${h + 12}" fill="#0b1020" fill-opacity="0.62"/><line x1="${left}" y1="${y}" x2="${right}" y2="${y}" stroke="#ffffff" stroke-opacity="0.28" stroke-width="6" stroke-linecap="round"/><line x1="${left}" y1="${y}" x2="${x.toFixed(1)}" y2="${y}" stroke="#ffd166" stroke-width="6" stroke-linecap="round"/>${ticks}${flag}${runner}</svg>`);
 }
 
 /** One frame: the page through `view`, or (while a new page comes in) the old page sliding out left and the new one in. */
@@ -170,12 +192,12 @@ export async function pageFrame(pages: Map<string, PagePicture | null>, state: P
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><rect width="100%" height="100%" fill="#0b1020"/><text x="960" y="520" text-anchor="middle" font-family="${FONT}" font-size="40" fill="#8a96ad">Missing page: ${escapeXml(state.file)}</text></svg>`;
     return sharp(Buffer.from(svg)).composite([caption, ...bar]).png().toBuffer();
   }
-  const current = await viewImage(page, view);
+  const current = await viewImage(page, view, state.box, options.spotlight ?? 1);
   const outgoing = slide ? pages.get(slide.previous.file) : null;
   if (!slide || !outgoing) return sharp(current).composite([caption, ...bar]).png().toBuffer();
   const shift = Math.round(easeInOut(slide.t) * WIDTH);
   const layers: OverlayOptions[] = [];
-  if (shift < WIDTH) layers.push({ input: await sharp(await viewImage(outgoing, slide.view)).extract({ left: shift, top: 0, width: WIDTH - shift, height: HEIGHT }).png().toBuffer(), left: 0, top: 0 });
+  if (shift < WIDTH) layers.push({ input: await sharp(await viewImage(outgoing, slide.view, slide.previous.box, 1)).extract({ left: shift, top: 0, width: WIDTH - shift, height: HEIGHT }).png().toBuffer(), left: 0, top: 0 });
   if (shift > 0) layers.push({ input: await sharp(current).extract({ left: 0, top: 0, width: shift, height: HEIGHT }).png().toBuffer(), left: WIDTH - shift, top: 0 });
   return sharp({ create: { width: WIDTH, height: HEIGHT, channels: 3, background: "#0b1020" } }).composite([...layers, caption, ...bar]).png().toBuffer();
 }
@@ -195,7 +217,7 @@ export async function createPageFrames(pages: Map<string, PagePicture | null>, s
     const count = Math.max(1, Math.round(Math.min(TRANSITION_SECONDS, allocatedDuration * 0.5) * FPS));
     for (let index = 0; index < count; index += 1) {
       const t = (index + 1) / count;
-      const options = { sweep: 0, progress: at(frames.length / FPS) };
+      const options = { sweep: 0, spotlight: 0, progress: at(frames.length / FPS) };
       const png = samePage
         ? await pageFrame(pages, state, mixView(prevEnd, views.start, easeInOut(t)), 1, undefined, options)
         : await pageFrame(pages, state, views.start, clamp(t * 2 - 1), t < 1 ? { previous: previous!, view: prevEnd, t } : undefined, options);
@@ -209,7 +231,7 @@ export async function createPageFrames(pages: Map<string, PagePicture | null>, s
     const elapsed = (index / holdCount) * held;
     const view = mixView(views.start, views.end, easeInOut(holdCount === 1 ? 1 : index / (holdCount - 1)));
     const sweep = clamp((elapsed + 1 / HOLD_FPS) / SWEEP_SECONDS);
-    frames.push({ png: await pageFrame(pages, state, view, 1, undefined, { sweep, progress: at(start + elapsed) }), duration: held / holdCount });
+    frames.push({ png: await pageFrame(pages, state, view, 1, undefined, { sweep, spotlight: sweep, progress: at(start + elapsed) }), duration: held / holdCount });
   }
   return frames;
 }
@@ -250,5 +272,32 @@ export async function createKeyPointsFrames(background: PagePicture | null | und
   const frames: { png: Buffer; duration: number }[] = [];
   for (let index = 0; index < count; index += 1) frames.push({ png: await keyPointsFrame(background, title, points, ((index + 1) / count) * points.length, at(index / FPS)), duration: 1 / FPS });
   frames.push({ png: await keyPointsFrame(background, title, points, points.length, at(count / FPS)), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
+  return frames;
+}
+
+/** Chapter card: the chapter's page blurred behind, "ભાગ 2 / 6" (Part), the title, and a dot per chapter (done ones filled). */
+export async function chapterFrame(background: PagePicture | null | undefined, chapter: { number: number; total: number; title: string }, t: number, progress?: number) {
+  const gujarati = GUJARATI.test(chapter.title);
+  const a = easeInOut(clamp(t)), rise = (1 - a) * 40;
+  const dots = Array.from({ length: chapter.total }, (_, i) => { const cx = WIDTH / 2 + (i - (chapter.total - 1) / 2) * 56; return i + 1 < chapter.number ? `<circle cx="${cx}" cy="760" r="12" fill="#ffd166"/>` : i + 1 === chapter.number ? `<circle cx="${cx}" cy="760" r="17" fill="#ffd166" stroke="#ffffff" stroke-width="4"/>` : `<circle cx="${cx}" cy="760" r="12" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="3"/>`; }).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><rect width="${WIDTH}" height="${HEIGHT}" fill="#05070d" fill-opacity="0.35"/>
+    <g opacity="${a.toFixed(3)}" transform="translate(0 ${rise.toFixed(1)})">
+      <rect x="${WIDTH / 2 - 150}" y="330" width="300" height="64" rx="32" fill="#ffd166"/>
+      <text x="${WIDTH / 2}" y="374" text-anchor="middle" font-family="${FONT}" font-size="34" font-weight="800" fill="#0b1020">${gujarati ? "ભાગ" : "Part"} ${chapter.number} / ${chapter.total}</text>
+      <text x="${WIDTH / 2}" y="560" text-anchor="middle" font-family="${FONT}" font-size="${chapter.title.length > 22 ? 96 : 116}" font-weight="800" fill="#ffffff">${escapeXml(chapter.title)}</text>
+      <rect x="${WIDTH / 2 - 120}" y="610" width="240" height="8" rx="4" fill="#ffd166"/>
+      ${dots}
+    </g></svg>`;
+  const base = background ? sharp(background.blurred) : sharp({ create: { width: WIDTH, height: HEIGHT, channels: 3, background: "#0b1020" } });
+  return base.composite([{ input: Buffer.from(svg), left: 0, top: 0 }, ...(progress === undefined ? [] : [{ input: progressBar(progress), left: 0, top: 0 }])]).png().toBuffer();
+}
+
+/** All frames of a chapter row: the card rises in over ~0.8 s, then holds. */
+export async function createChapterFrames(background: PagePicture | null | undefined, chapter: { number: number; total: number; title: string }, allocatedDuration: number, progress?: PageProgress) {
+  const at = (seconds: number) => (progress ? progress.from + (progress.to - progress.from) * clamp(seconds / Math.max(allocatedDuration, 1e-6)) : undefined);
+  const count = Math.max(1, Math.round(Math.min(0.8, allocatedDuration * 0.4) * FPS));
+  const frames: { png: Buffer; duration: number }[] = [];
+  for (let index = 0; index < count; index += 1) frames.push({ png: await chapterFrame(background, chapter, (index + 1) / count, at(index / FPS)), duration: 1 / FPS });
+  frames.push({ png: await chapterFrame(background, chapter, 1, at(count / FPS)), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
   return frames;
 }

@@ -14,7 +14,7 @@ import { probeFinalVideo } from "@/lib/video-qa";
 import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } from "@/lib/pedagogy-transition";
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
 import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
-import { createKeyPointsFrames, createPageFrames, loadPagePictures, type PageState } from "@/lib/pedagogy-page";
+import { createChapterFrames, createKeyPointsFrames, createPageFrames, loadPagePictures, type PageState } from "@/lib/pedagogy-page";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, solutionDiagramFiles } from "@/lib/pedagogy-solution";
 import { loadPedagogyImage } from "@/lib/pedagogy-infographic";
 import { atlasSceneKey, openJourneyRenderer, planAtlasRow, planJourneyRow } from "@/lib/pedagogy-journey";
@@ -157,7 +157,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const missingPictures = [...pictures].filter(([, image]) => !image).map(([file]) => file);
   if (pictures.size) console.info("Pedagogy look pictures", { pictures: pictures.size - missingPictures.length, path: missingPictures.length ? "missing-picture-placeholder" : "picture-files", missingPictures });
   // visual = page (flipbook style, 3 Nov 2026): whole booklet pages; sheets without it load nothing here.
-  const pages = await loadPagePictures(lookRows.flatMap((row) => { const visual = parsePedagogyVisual(row.visual, row.visualData); return visual.kind === "page" ? [visual.file] : []; }));
+  const pages = await loadPagePictures(lookRows.flatMap((row) => { const visual = parsePedagogyVisual(row.visual, row.visualData); return visual.kind === "page" || (visual.kind === "chapter" && visual.file) ? [visual.file] : []; }));
   const missingPages = [...pages].filter(([, page]) => !page).map(([file]) => file);
   if (pages.size) console.info("Pedagogy page slides", { pages: pages.size - missingPages.length, path: missingPages.length ? "missing-page-placeholder" : "page-files", missingPages });
   if (lookRows.length) console.info("Pedagogy look slides", { rows: lookRows.length, logos: logos.size - missingLogos.length, path: missingLogos.length ? "logo-name-tiles" : "logo-files", missingLogos });
@@ -344,6 +344,14 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
           const frames = await createKeyPointsFrames(lastPage?.kind === "page" ? pages.get(lastPage.file) : null, visual.title, visual.points, row.allocatedDuration, rowProgress(row));
           for (const [frame, { png, duration }] of frames.entries()) {
             const framePath = `${framePrefix}-k${String(frame).padStart(3, "0")}.png`;
+            await writeFile(framePath, png);
+            concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+            lastFrame = framePath;
+          }
+        } else if (visual.kind === "chapter") {
+          const frames = await createChapterFrames(visual.file ? pages.get(visual.file) : null, visual, row.allocatedDuration, rowProgress(row));
+          for (const [frame, { png, duration }] of frames.entries()) {
+            const framePath = `${framePrefix}-c${String(frame).padStart(3, "0")}.png`;
             await writeFile(framePath, png);
             concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
             lastFrame = framePath;
