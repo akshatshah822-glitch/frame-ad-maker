@@ -69,14 +69,7 @@ async function inkMap(full: Buffer, pageWidth: number): Promise<PageInk> {
   return { scale: w / pageWidth, w, h, rows, cols };
 }
 
-/** How much a frame edge along page row `y` (from x0 to x1) would cut through ink: 0 = a clean gap. Page edges cost 0. */
-function rowCut(ink: PageInk, y: number, x0: number, x1: number) {
-  const r = Math.round(y * ink.scale), a = Math.max(0, Math.round(x0 * ink.scale)), b = Math.min(ink.w, Math.round(x1 * ink.scale));
-  if (r <= 1 || r >= ink.h - 2 || b - a < 2) return 0;
-  let sum = 0;
-  for (let k = r - 2; k <= r + 2; k += 1) sum += ink.rows[k * (ink.w + 1) + b] - ink.rows[k * (ink.w + 1) + a];
-  return sum / ((b - a) * 5);
-}
+/** How much a frame edge along page column `x` (from y0 to y1) would cut through ink: 0 = a clean gap. Page edges cost 0. */
 function colCut(ink: PageInk, x: number, y0: number, y1: number) {
   const c = Math.round(x * ink.scale), a = Math.max(0, Math.round(y0 * ink.scale)), b = Math.min(ink.h, Math.round(y1 * ink.scale));
   if (c <= 1 || c >= ink.w - 2 || b - a < 2) return 0;
@@ -103,16 +96,34 @@ export function pageViews(page: { width: number; height: number; ink?: PageInk }
   const boxW = x1 - x0, boxH = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   const ink = page.ink;
   const fit = Math.max(boxW, boxH * ratio);
+  // Ink along every row of the small copy between x and x + w (fraction of edge pixels); rows at the page edge count as clean.
+  const rowInk = (x: number, w: number) => {
+    if (!ink) return null;
+    const a = Math.max(0, Math.round(x * ink.scale)), b = Math.min(ink.w, Math.round((x + w) * ink.scale)), out = new Float64Array(ink.h);
+    for (let r = 0; r < ink.h; r += 1) out[r] = b - a < 2 ? 0 : (ink.rows[r * (ink.w + 1) + b] - ink.rows[r * (ink.w + 1) + a]) / (b - a);
+    return out;
+  };
+  // An edge at page row y: the worst of the rows it touches (y ± 1 on the small copy), so it must sit in a real gap.
+  const edgeAt = (rows: Float64Array | null, y: number) => {
+    if (!rows || !ink) return 0;
+    const r = Math.round(y * ink.scale);
+    if (r <= 1 || r >= ink.h - 2) return 0;
+    return Math.max(rows[r - 1], rows[r], rows[r + 1]);
+  };
   if (fit <= page.width) {
     let best: PageView = { x: clamp(cx - fit / 2, 0, page.width - fit), y: clamp(cy - fit / ratio / 2, 0, Math.max(0, page.height - fit / ratio)), w: fit };
     if (ink) {
       let bestCost = Infinity;
-      for (let k = 0; k <= 8; k += 1) {
-        const w = Math.min(page.width, fit * (1 + 0.05 * k)), safe = w / ratio;
-        for (const x of steps(Math.max(0, x1 - w), Math.min(x0, page.width - w), 9)) {
-          for (const y of steps(Math.max(0, y1 - safe), Math.min(y0, Math.max(0, page.height - safe)), 17)) {
-            const cut = rowCut(ink, y, x, x + w) + rowCut(ink, y + safe, x, x + w) + colCut(ink, x, y, y + safe) + colCut(ink, x + w, y, y + safe);
-            const cost = cut + 0.01 * k + 0.002 * (Math.abs(x + w / 2 - cx) + Math.abs(y + safe / 2 - cy)) / safe;
+      const rowStep = 1 / ink.scale;
+      for (let k = 0; k <= 10; k += 1) {
+        const w = Math.min(page.width, fit * (1 + 0.04 * k)), safe = w / ratio;
+        for (const x of steps(Math.max(0, x1 - w), Math.min(x0, page.width - w), 7)) {
+          const rows = rowInk(x, w);
+          const side = colCut(ink, x, y0, y1) + colCut(ink, x + w, y0, y1);
+          const lo = Math.max(0, y1 - safe), hi = Math.min(y0, Math.max(0, page.height - safe));
+          for (let y = lo; y <= Math.max(lo, hi) + 1e-6; y += rowStep) {
+            const cut = edgeAt(rows, y) + edgeAt(rows, y + safe) + side;
+            const cost = cut + 0.004 * k + 0.001 * (Math.abs(x + w / 2 - cx) + Math.abs(y + safe / 2 - cy)) / safe;
             if (cost < bestCost) { bestCost = cost; best = { x, y, w }; }
           }
         }
@@ -121,10 +132,10 @@ export function pageViews(page: { width: number; height: number; ink?: PageInk }
     }
     return { start: best, end: best, pan: false };
   }
-  const w = page.width, safe = w / ratio;
-  const pick = (lo: number, hi: number, edge: (y: number) => number) => { let bestY = (lo + hi) / 2, bestCost = Infinity; for (const y of steps(lo, hi, 25)) { const c = ink ? edge(y) : 0; if (c < bestCost) { bestCost = c; bestY = y; } } return bestY; };
-  const top = pick(Math.max(0, y0 - safe * 0.12), y0, (y) => (ink ? rowCut(ink, y, 0, w) : 0));
-  const bottom = pick(y1, Math.min(page.height, y1 + safe * 0.12), (y) => (ink ? rowCut(ink, y, 0, w) : 0));
+  const w = page.width, safe = w / ratio, rows = rowInk(0, w);
+  const pick = (lo: number, hi: number) => { let bestY = (lo + hi) / 2, bestCost = Infinity; for (let y = lo; y <= hi; y += ink ? 1 / ink.scale : hi - lo + 1) { const c = edgeAt(rows, y); if (c < bestCost - 1e-9) { bestCost = c; bestY = y; } } return bestY; };
+  const top = pick(Math.max(0, y0 - safe * 0.15), y0);
+  const bottom = pick(y1, Math.min(page.height, y1 + safe * 0.15));
   return { start: { x: 0, y: top, w }, end: { x: 0, y: Math.max(top, bottom - safe), w }, pan: true };
 }
 
