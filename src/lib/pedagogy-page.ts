@@ -158,7 +158,7 @@ function computeViews(page: { width: number; height: number; ink?: PageInk }, bo
           for (let y = lo; y <= Math.max(lo, hi) + 1e-6; y += rowStep) {
             // Side edges are checked over the whole visible height, not just the box.
             const cut = edgeAt(rows, y) + edgeAt(rows, y + safe) + colCut(ink, x, y, y + safe) + colCut(ink, x + w, y, y + safe);
-            const cost = 4 * cut + 0.004 * k + 0.001 * (Math.abs(x + w / 2 - cx) + Math.abs(y + safe / 2 - cy)) / safe;
+            const cost = 10 * cut + 0.004 * k + 0.001 * (Math.abs(x + w / 2 - cx) + Math.abs(y + safe / 2 - cy)) / safe;
             if (cost < bestCost) { bestCost = cost; best = { x, y, w }; }
           }
         }
