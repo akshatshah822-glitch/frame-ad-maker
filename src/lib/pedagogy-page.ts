@@ -124,9 +124,21 @@ function computeViews(page: { width: number; height: number; ink?: PageInk }, bo
   // The box's own top and bottom move to the nearest clean gap (mostly outward), so the spotlight never crosses a line.
   if (ink) {
     const rows = rowInk(x0, x1 - x0), step = 1 / ink.scale;
-    const snap = (from: number, lo: number, hi: number) => { let best = from, cost = edgeAt(rows, from) + 1e-9; for (let y = lo; y <= hi; y += step) { const c = edgeAt(rows, y) + 0.00002 * Math.abs(y - from); if (c < cost) { cost = c; best = y; } } return best; };
-    y0 = snap(y0, Math.max(0, y0 - page.height * 0.03), Math.min(y1, y0 + page.height * 0.008));
-    y1 = snap(y1, Math.max(y0, y1 - page.height * 0.008), Math.min(page.height, y1 + page.height * 0.03));
+    // The nearest row that is a real gap (outward first at each distance); failing that, the cleanest row in reach.
+    const snap = (from: number, outward: number, reachOut: number, reachIn: number) => {
+      let best = from, cost = Infinity;
+      for (let d = 0; d <= reachOut; d += step) {
+        for (const y of [from + outward * d, from - outward * d]) {
+          if (y < 0 || y > page.height || (Math.sign(y - from) === -outward && d > reachIn)) continue;
+          const c = edgeAt(rows, y);
+          if (c <= 0.012) return y;
+          if (c < cost) { cost = c; best = y; }
+        }
+      }
+      return best;
+    };
+    y0 = snap(y0, -1, page.height * 0.03, page.height * 0.008);
+    y1 = snap(y1, 1, page.height * 0.03, page.height * 0.008);
   }
   const boxW = x1 - x0, boxH = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   const frame = { x0, y0, x1, y1 };
