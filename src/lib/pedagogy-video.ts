@@ -14,6 +14,7 @@ import { probeFinalVideo } from "@/lib/video-qa";
 import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } from "@/lib/pedagogy-transition";
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
 import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
+import { hasGujarati, setNeatFont } from "@/lib/pedagogy-hand";
 import { createKeyPointsFrames, createPageFrames, loadPagePictures, type PageState } from "@/lib/pedagogy-page";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, solutionDiagramFiles } from "@/lib/pedagogy-solution";
 import { loadPedagogyImage } from "@/lib/pedagogy-infographic";
@@ -159,6 +160,10 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const missingPages = [...pages].filter(([, page]) => !page).map(([file]) => file);
   if (pages.size) console.info("Pedagogy page slides", { pages: pages.size - missingPages.length, path: missingPages.length ? "missing-page-placeholder" : "page-files", missingPages });
   if (lookRows.length) console.info("Pedagogy look slides", { rows: lookRows.length, logos: logos.size - missingLogos.length, path: missingLogos.length ? "logo-name-tiles" : "logo-files", missingLogos });
+  // Gujarati boards (4 Nov 2026): a neat system font instead of the handwriting, for the whole video.
+  const neatBoard = timeline.rows.some((row) => row.effectiveTheme === "board" && hasGujarati([row.effectiveBoard, row.effectiveProblem, row.effectiveSteps, row.diagramItems, row.effectiveTrap, row.effectiveTrick, row.effectiveRemember].join(" ")));
+  setNeatFont(neatBoard);
+  if (timeline.rows.some((row) => row.effectiveTheme === "board")) console.info("Pedagogy hand font", { path: neatBoard ? "neat-gujarati-font" : "handwriting" });
   // orientation (Oct 30 2026): portrait draws the solution boards at 1080 × 1920; anything else stays landscape.
   const portrait = timeline.rows.some((row) => row.effectiveOrientation === "portrait");
   console.info("Pedagogy orientation", { path: portrait ? "portrait-1080x1920" : "landscape-1920x1080" });

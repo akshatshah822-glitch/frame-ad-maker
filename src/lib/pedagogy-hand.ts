@@ -79,10 +79,46 @@ function layout(runs: Run[], size: number) {
   return { parts, width: x };
 }
 
+// Neat mode (4 Nov 2026): Gujarati needs real text shaping, which path drawing cannot do, so a board with Gujarati
+// text is written in a clean system font instead of the handwriting (Noto Sans Gujarati, else the Mac's own).
+export const NEAT_FONT = "'Noto Sans Gujarati', 'Gujarati Sangam MN', 'Gujarati MT', Arial, 'Helvetica Neue', sans-serif";
+const GUJARATI = /[\u0A80-\u0AFF]/;
+/** Vowel signs drawn above or below a letter (no width of their own), and signs drawn beside it. */
+const GUJARATI_MARK = /[\u0A81\u0A82\u0ABC\u0AC1-\u0AC8\u0ACD\u0AE2\u0AE3]/;
+const GUJARATI_SIGN = /[\u0A83\u0ABE-\u0AC0\u0AC9-\u0ACC]/;
+/** Kept on globalThis so every loaded copy of this module sees the same switch. */
+const NEAT_KEY = Symbol.for("frame.pedagogy.neatFont");
+const neatOn = () => (globalThis as Record<symbol, unknown>)[NEAT_KEY] === true;
+/** Whole-video switch, set by the renderer before drawing (it logs which font path ran). */
+export function setNeatFont(on: boolean) { (globalThis as Record<symbol, unknown>)[NEAT_KEY] = on; }
+export const hasGujarati = (text: string) => GUJARATI.test(text);
+const GUJARATI_LABELS: Record<string, string> = { TRAP: "ભૂલ", TRICK: "ટ્રિક", REMEMBER: "યાદ રાખો", "Sol.": "ઉકેલ", "Trick drawing": "ટ્રિક ચિત્ર", Trick: "ટ્રિક" };
+/** The board's own labels, in Gujarati on a Gujarati (neat) board. */
+export const boardLabel = (english: string) => (neatOn() ? GUJARATI_LABELS[english] ?? english : english);
+/** Rough advance of a character in the neat font (only used to size boxes, circles and squeezing). */
+function neatAdvance(char: string, size: number, bold: boolean) {
+  const base = GUJARATI_MARK.test(char) ? 0 : GUJARATI_SIGN.test(char) ? 0.27 : GUJARATI.test(char) ? 0.66 : /\s/.test(char) ? 0.28 : /[0-9]/.test(char) ? 0.56 : /[.,:;|'’]/.test(char) ? 0.3 : /[A-Z]/.test(char) ? 0.66 : /[a-z]/.test(char) ? 0.54 : 0.62;
+  return size * base * (bold && GUJARATI.test(char) ? 1.07 : bold ? 1.02 : 1);
+}
+function neatText(list: Run[], x: number, y: number, size: number, options: { anchor?: "start" | "middle" | "end"; maxWidth?: number }) {
+  const widths = list.map((run) => [...run.text].reduce((sum, char) => sum + neatAdvance(char, size, run.bold), 0));
+  const width = widths.reduce((a, b) => a + b, 0);
+  const squeeze = options.maxWidth && width > options.maxWidth ? options.maxWidth / width : 1;
+  const shown = width * squeeze;
+  const left = options.anchor === "middle" ? x - shown / 2 : options.anchor === "end" ? x - shown : x;
+  const spans = list.map((run) => `<tspan fill="${run.fill}" font-weight="${run.bold ? 700 : 500}">${esc(run.text)}</tspan>`).join("");
+  // Squeeze with a transform: the SVG renderer ignores textLength.
+  const svg = `<g transform="translate(${left.toFixed(1)} ${y.toFixed(1)}) scale(${squeeze.toFixed(4)} 1)"><text x="0" y="0" font-family="${NEAT_FONT}" font-size="${size}" xml:space="preserve">${spans}</text></g>`;
+  let at = left;
+  const boxes = widths.map((w) => { const box = { x1: at, x2: at + w * squeeze }; at += w * squeeze; return box; });
+  return { svg, width: shown, left, boxes };
+}
+
 /** Handwritten text; `maxWidth` squeezes it horizontally rather than letting it spill. Null when no font loaded. */
 export function handText(runs: Run[] | string, x: number, y: number, size: number, fill: string, options: { anchor?: "start" | "middle" | "end"; bold?: boolean; maxWidth?: number } = {}) {
-  if (!handFontReady()) return null;
   const list: Run[] = typeof runs === "string" ? [{ text: runs, fill, bold: Boolean(options.bold) }] : runs;
+  if (neatOn() || list.some((run) => GUJARATI.test(run.text))) return neatText(list, x, y, size, options);
+  if (!handFontReady()) return null;
   const scaled = size * HAND_SCALE;
   const { parts, width } = layout(list, scaled);
   const squeeze = options.maxWidth && width > options.maxWidth ? options.maxWidth / width : 1;

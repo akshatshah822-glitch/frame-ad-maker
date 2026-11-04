@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import { SOLUTION_COLOURS, type SolutionDiagram } from "@/lib/pedagogy-solution";
-import { handCircle, handText, handUnderline, starRuns, systemWidth } from "@/lib/pedagogy-hand";
+import { boardLabel, handCircle, handText, handUnderline, starRuns, systemWidth } from "@/lib/pedagogy-hand";
 
 // theme = board (Oct 2026): the whole question solved on the board the way a topper writes it. Working lines sit on
 // notebook rules with the "=" signs in one column; each line writes itself on while it is spoken (no visible pen).
@@ -32,7 +32,7 @@ export type BoardSlideState = {
 
 const BG = "#0f1724", INK = "#e8eef9", MUTED = "#7d8aa0", SOFT = "#b5c0d0", RULE = "#1c2840", PANEL = "#131d2e", PANEL_LINE = "#263552";
 const { yellow: Y, blue: B, red: R } = SOLUTION_COLOURS;
-const FONT = "Arial, 'Helvetica Neue', 'Kohinoor Devanagari', 'DejaVu Sans', sans-serif";
+const FONT = "Arial, 'Helvetica Neue', 'Kohinoor Devanagari', 'Noto Sans Gujarati', 'Gujarati Sangam MN', 'DejaVu Sans', sans-serif";
 const clamp = (v: number) => Math.min(1, Math.max(0, v));
 const esc = (v: string) => v.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const text = (x: number, y: number, size: number, fill: string, content: string, extra = "") => `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="${FONT}" font-size="${size}" fill="${fill}" ${extra}>${content}</text>`;
@@ -232,7 +232,7 @@ export function boardSlideSvg(state: BoardSlideState, progress = 1) {
   const notes = (["TRAP", "TRICK"] as const).map((kind) => ({ kind, ...note(kind === "TRAP" ? state.notes.trap : state.notes.trick) })).filter((x) => x.text);
   for (let i = 0; i < n; i += 1) s += `<line x1="${margin}" y1="${base(i) + 12}" x2="1140" y2="${base(i) + 12}" stroke="${RULE}" stroke-width="1.5"/>`;
   s += `<line x1="${margin - 14}" y1="${divider + 18}" x2="${margin - 14}" y2="${base(n - 1) + 40}" stroke="#4a2a3a" stroke-width="2"/>`;
-  s += hand("Sol.", 100, divider + 46, 30, MUTED).svg;
+  s += hand(boardLabel("Sol."), 100, divider + 46, 30, MUTED).svg;
   const split = state.lines.map((line) => { const at = line.text.indexOf(" = "); return at > 0 ? { left: line.text.slice(0, at), right: line.text.slice(at + 3) } : { left: "", right: line.text }; });
   const leftWidth = Math.max(0, ...split.map((p) => (p.left ? (handText(p.left, 0, 0, fs, INK)?.width ?? systemWidth(p.left, fs)) : 0)));
   const eqX = Math.max(520, Math.min(760, margin + 40 + leftWidth + 22));
@@ -254,7 +254,7 @@ export function boardSlideSvg(state: BoardSlideState, progress = 1) {
       const id = `w${i}`;
       g = `<clipPath id="${id}"><rect x="${(x1 - 70).toFixed(1)}" y="${y - 60}" width="${((x2 - x1 + 80) * pace).toFixed(1)}" height="90"/></clipPath><g clip-path="url(#${id})">${g}</g>`;
     }
-    if (tag) { const w = tag.kind.length * 15 + 26; s += `<g opacity="${writing ? clamp(pace * 4).toFixed(3) : 1}"><rect x="${margin - 30 - w}" y="${y - 32}" width="${w}" height="38" rx="8" fill="${KIND[tag.kind]}"/>${text(margin - 30 - w / 2, y - 6, 19, "#111827", tag.kind, 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}</g>`; }
+    if (tag) { const w = boardLabel(tag.kind).length * 15 + 26; s += `<g opacity="${writing ? clamp(pace * 4).toFixed(3) : 1}"><rect x="${margin - 30 - w}" y="${y - 32}" width="${w}" height="38" rx="8" fill="${KIND[tag.kind]}"/>${text(margin - 30 - w / 2, y - 6, 19, "#111827", boardLabel(tag.kind), 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}</g>`; }
     s += g;
   });
 
@@ -269,20 +269,20 @@ export function boardSlideSvg(state: BoardSlideState, progress = 1) {
     const big = found ? found.file : figures.figures[0].file;
     s += hand(found ? `(${figures.figures[0].label}) inside (${found.label})` : `Find (${figures.figures[0].label})`, 1228, panelTop + 40, 24, found ? "#4fd1a5" : MUTED).svg;
     if (figures.figures[0].order < state.drawn) s += figureTile(state.figureImages, big, 1512 - 85, panelTop + 30, 176, 1, found ? "#4fd1a5" : "");
-  } else s += hand("Trick drawing", 1228, panelTop + 40, 24, MUTED).svg + panelDrawing(state.diagram, state.drawn, 1228, panelTop + 56);
+  } else s += hand(boardLabel("Trick drawing"), 1228, panelTop + 40, 24, MUTED).svg + panelDrawing(state.diagram, state.drawn, 1228, panelTop + 56);
   let ny = panelTop + panelHeight + 60;
   for (const tag of notes) {
     if (tag.line >= state.shown && tag.line >= 0) continue;
     if (tag.line < 0 && state.shown === 0) continue;
-    const c = KIND[tag.kind], w = tag.kind.length * 15 + 26;
-    s += `<rect x="1200" y="${ny - 29}" width="${w}" height="38" rx="8" fill="${c}"/>${text(1200 + w / 2, ny - 3, 19, "#111827", tag.kind, 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}`;
+    const c = KIND[tag.kind], w = boardLabel(tag.kind).length * 15 + 26;
+    s += `<rect x="1200" y="${ny - 29}" width="${w}" height="38" rx="8" fill="${c}"/>${text(1200 + w / 2, ny - 3, 19, "#111827", boardLabel(tag.kind), 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}`;
     s += hand(tag.text, 1200 + w + 14, ny, 29, c, "start", 624 - w - 14).svg;
     ny += 62;
   }
   const remember = note(state.notes.remember).text;
   if (remember && n > 0 && state.shown >= n) {
     const fresh = state.shownBefore < n;
-    s += `<g opacity="${fresh ? clamp(pace * 2 - 0.6).toFixed(3) : 1}"><rect x="1200" y="${ny - 14}" width="624" height="104" rx="16" fill="#132034" stroke="${B}" stroke-width="2" stroke-dasharray="10 8"/><rect x="1222" y="${ny + 4}" width="150" height="34" rx="8" fill="${B}"/>${text(1297, ny + 28, 19, "#111827", "REMEMBER", 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}${hand(remember, 1222, ny + 74, 28, INK, "start", 584).svg}</g>`;
+    s += `<g opacity="${fresh ? clamp(pace * 2 - 0.6).toFixed(3) : 1}"><rect x="1200" y="${ny - 14}" width="624" height="104" rx="16" fill="#132034" stroke="${B}" stroke-width="2" stroke-dasharray="10 8"/><rect x="1222" y="${ny + 4}" width="150" height="34" rx="8" fill="${B}"/>${text(1297, ny + 28, 19, "#111827", boardLabel("REMEMBER"), 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}${hand(remember, 1222, ny + 74, 28, INK, "start", 584).svg}</g>`;
   }
   s += text(1824, 1052, 20, "#4f5d75", "FRAME", 'text-anchor="end" letter-spacing="2"');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">${s}</svg>`;
@@ -302,7 +302,7 @@ export function boardTrickCardSvg(state: Pick<BoardSlideState, "chapter" | "ques
   const parts = emphasis && english.includes(emphasis) ? english.split(emphasis) : [english];
   const runs = parts.flatMap((part, i) => (i < parts.length - 1 ? [{ text: part, fill: INK, bold: true }, { text: emphasis, fill: Y, bold: true }] : [{ text: part, fill: INK, bold: true }])).filter((run) => run.text);
   const title = handText(runs, 960, 570, 92, INK, { anchor: "middle", bold: true, maxWidth: 1640 });
-  let s = `<rect width="1920" height="1080" fill="${BG}"/>${text(960, 400, 32, "#8cc4ff", esc(pill), 'text-anchor="middle" letter-spacing="3"')}${hand("Trick", 960, 460, 38, MUTED, "middle").svg}`;
+  let s = `<rect width="1920" height="1080" fill="${BG}"/>${text(960, 400, 32, "#8cc4ff", esc(pill), 'text-anchor="middle" letter-spacing="3"')}${hand(boardLabel("Trick"), 960, 460, 38, MUTED, "middle").svg}`;
   s += title ? title.svg + handUnderline(title.left + 30, title.left + title.width - 30, 606, Y, state.title, 1, 6) : text(960, 570, 80, INK, esc(english), 'text-anchor="middle" font-weight="800"');
   if (hindi) s += text(960, 690, 48, "#cfd8e6", esc(hindi), 'text-anchor="middle" font-weight="600"');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">${s}</svg>`;
@@ -396,7 +396,7 @@ export function boardSlideSvgPortrait(state: BoardSlideState, progress = 1) {
   const base = (i: number) => first + i * step;
   for (let i = 0; i < n; i += 1) s += `<line x1="${margin}" y1="${base(i) + 12}" x2="${PR}" y2="${base(i) + 12}" stroke="${RULE}" stroke-width="1.5"/>`;
   s += `<line x1="${margin - 14}" y1="${divider + 18}" x2="${margin - 14}" y2="${base(Math.max(0, n - 1)) + 40}" stroke="#4a2a3a" stroke-width="2"/>`;
-  s += hand("Sol.", PS, divider + 48, 30, MUTED).svg;
+  s += hand(boardLabel("Sol."), PS, divider + 48, 30, MUTED).svg;
   const split = state.lines.map((line) => { const at = line.text.indexOf(" = "); return at > 0 ? { left: line.text.slice(0, at), right: line.text.slice(at + 3) } : { left: "", right: line.text }; });
   const leftWidth = Math.max(0, ...split.map((p) => (p.left ? (handText(p.left, 0, 0, fs, INK)?.width ?? systemWidth(p.left, fs)) : 0)));
   const eqX = Math.max(380, Math.min(560, margin + 40 + leftWidth + 22));
@@ -418,7 +418,7 @@ export function boardSlideSvgPortrait(state: BoardSlideState, progress = 1) {
       const id = `pw${i}`;
       g = `<clipPath id="${id}"><rect x="${(x1 - 60).toFixed(1)}" y="${y - 62}" width="${((x2 - x1 + 70) * pace).toFixed(1)}" height="92"/></clipPath><g clip-path="url(#${id})">${g}</g>`;
     }
-    if (tag) { const w = tag.kind.length * 15 + 26; s += `<g opacity="${writing ? clamp(pace * 4).toFixed(3) : 1}"><rect x="${margin - 24 - w}" y="${y - 32}" width="${w}" height="38" rx="8" fill="${KIND[tag.kind]}"/>${text(margin - 24 - w / 2, y - 6, 19, "#111827", tag.kind, 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}</g>`; }
+    if (tag) { const w = boardLabel(tag.kind).length * 15 + 26; s += `<g opacity="${writing ? clamp(pace * 4).toFixed(3) : 1}"><rect x="${margin - 24 - w}" y="${y - 32}" width="${w}" height="38" rx="8" fill="${KIND[tag.kind]}"/>${text(margin - 24 - w / 2, y - 6, 19, "#111827", boardLabel(tag.kind), 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}</g>`; }
     s += g;
   });
 
@@ -429,19 +429,19 @@ export function boardSlideSvgPortrait(state: BoardSlideState, progress = 1) {
     const found = figures.found && figures.found.order < state.drawn ? figures.found : null;
     s += hand(found ? `(${figures.figures[0].label}) inside (${found.label})` : `Find (${figures.figures[0].label})`, PS + 28, panelTop + 44, 28, found ? "#4fd1a5" : MUTED).svg;
     if (figures.figures[0].order < state.drawn) s += figureTile(state.figureImages, found ? found.file : figures.figures[0].file, PW / 2 + 60, panelTop + 25, 200, 1, found ? "#4fd1a5" : "");
-  } else s += hand("Trick drawing", PS + 28, panelTop + 40, 24, MUTED).svg + `<g transform="translate(${PS + (PR - PS - 568 * 1.45) / 2} ${panelTop + 40}) scale(1.45)">${panelDrawing(state.diagram, state.drawn, 0, 0)}</g>`;
+  } else s += hand(boardLabel("Trick drawing"), PS + 28, panelTop + 40, 24, MUTED).svg + `<g transform="translate(${PS + (PR - PS - 568 * 1.45) / 2} ${panelTop + 40}) scale(1.45)">${panelDrawing(state.diagram, state.drawn, 0, 0)}</g>`;
   let ny = panelTop + panelHeight + 60;
   for (const tag of notes) {
     if (tag.line >= state.shown && tag.line >= 0) continue;
     if (tag.line < 0 && state.shown === 0) continue;
-    const c = KIND[tag.kind], w = tag.kind.length * 15 + 26;
-    s += `<rect x="${PS}" y="${ny - 29}" width="${w}" height="38" rx="8" fill="${c}"/>${text(PS + w / 2, ny - 3, 19, "#111827", tag.kind, 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}`;
+    const c = KIND[tag.kind], w = boardLabel(tag.kind).length * 15 + 26;
+    s += `<rect x="${PS}" y="${ny - 29}" width="${w}" height="38" rx="8" fill="${c}"/>${text(PS + w / 2, ny - 3, 19, "#111827", boardLabel(tag.kind), 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}`;
     s += hand(tag.text, PS + w + 14, ny, 31, c, "start", PR - PS - w - 14).svg;
     ny += 66;
   }
   if (remember && n > 0 && state.shown >= n) {
     const fresh = state.shownBefore < n;
-    s += `<g opacity="${fresh ? clamp(pace * 2 - 0.6).toFixed(3) : 1}"><rect x="${PS}" y="${ny - 14}" width="${PR - PS}" height="108" rx="16" fill="#132034" stroke="${B}" stroke-width="2" stroke-dasharray="10 8"/><rect x="${PS + 22}" y="${ny + 4}" width="150" height="34" rx="8" fill="${B}"/>${text(PS + 97, ny + 28, 19, "#111827", "REMEMBER", 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}${hand(remember, PS + 22, ny + 76, 30, INK, "start", PR - PS - 44).svg}</g>`;
+    s += `<g opacity="${fresh ? clamp(pace * 2 - 0.6).toFixed(3) : 1}"><rect x="${PS}" y="${ny - 14}" width="${PR - PS}" height="108" rx="16" fill="#132034" stroke="${B}" stroke-width="2" stroke-dasharray="10 8"/><rect x="${PS + 22}" y="${ny + 4}" width="150" height="34" rx="8" fill="${B}"/>${text(PS + 97, ny + 28, 19, "#111827", boardLabel("REMEMBER"), 'font-weight="800" text-anchor="middle" letter-spacing="1.5"')}${hand(remember, PS + 22, ny + 76, 30, INK, "start", PR - PS - 44).svg}</g>`;
   }
   s += text(PR, PH - 30, 20, "#4f5d75", "FRAME", 'text-anchor="end" letter-spacing="2"');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}" viewBox="0 0 ${PW} ${PH}">${s}</svg>`;
@@ -457,7 +457,7 @@ export function boardTrickCardSvgPortrait(state: Pick<BoardSlideState, "chapter"
   const parts = emphasis && english.includes(emphasis) ? english.split(emphasis) : [english];
   const runs = parts.flatMap((part, i) => (i < parts.length - 1 ? [{ text: part, fill: INK, bold: true }, { text: emphasis, fill: Y, bold: true }] : [{ text: part, fill: INK, bold: true }])).filter((run) => run.text);
   const title = handText(runs, PW / 2, 930, 84, INK, { anchor: "middle", bold: true, maxWidth: PR - PS });
-  let s = `<rect width="${PW}" height="${PH}" fill="${BG}"/>${text(PW / 2, 760, 30, "#8cc4ff", esc(pill), 'text-anchor="middle" letter-spacing="3"')}${hand("Trick", PW / 2, 830, 38, MUTED, "middle").svg}`;
+  let s = `<rect width="${PW}" height="${PH}" fill="${BG}"/>${text(PW / 2, 760, 30, "#8cc4ff", esc(pill), 'text-anchor="middle" letter-spacing="3"')}${hand(boardLabel("Trick"), PW / 2, 830, 38, MUTED, "middle").svg}`;
   s += title ? title.svg + handUnderline(title.left + 30, title.left + title.width - 30, 966, Y, state.title, 1, 6) : text(PW / 2, 930, 72, INK, esc(english), 'text-anchor="middle" font-weight="800"');
   if (hindi) s += text(PW / 2, 1060, 46, "#cfd8e6", esc(hindi), 'text-anchor="middle" font-weight="600"');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}" viewBox="0 0 ${PW} ${PH}">${s}</svg>`;
