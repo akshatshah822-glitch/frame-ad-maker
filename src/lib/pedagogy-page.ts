@@ -105,7 +105,9 @@ function computeViews(page: { width: number; height: number; ink?: PageInk }, bo
   const toView = (v: PageView): PageView => ({ ...v, y: v.y - (TOP_BAR * v.w) / WIDTH });
   const pad = page.width * BOX_PAD;
   const x0 = clamp(box[0] * page.width - pad, 0, page.width), x1 = clamp(box[2] * page.width + pad, 0, page.width);
-  let y0 = clamp(box[1] * page.height - pad, 0, page.height), y1 = clamp(box[3] * page.height + pad, 0, page.height);
+  // Top and bottom start at the box itself and move to the nearest gap between lines (that gap is the margin); without an ink
+  // map they take the usual padding.
+  let y0 = clamp(box[1] * page.height - (page.ink ? 0 : pad), 0, page.height), y1 = clamp(box[3] * page.height + (page.ink ? 0 : pad), 0, page.height);
   const ink = page.ink;
   // Ink along every row of the small copy between x and x + w (fraction of edge pixels); rows at the page edge count as clean.
   const rowInk = (x: number, w: number) => {
