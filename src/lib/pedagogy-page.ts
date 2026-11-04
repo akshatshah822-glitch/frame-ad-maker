@@ -90,16 +90,23 @@ const mixView = (a: PageView, b: PageView, t: number): PageView => ({ x: a.x + (
  * whole in the part above the caption band. Among the views that hold it (a little wider is allowed), the one whose four
  * edges cut through the least ink is chosen, so no neighbouring line is shown cut in half. The view holds still. When the box
  * is too tall to fit even at the full page width, the camera pans down it, starting and ending on a gap. */
+const viewCache = new WeakMap<object, Map<string, ReturnType<typeof computeViews>>>();
 export function pageViews(page: { width: number; height: number; ink?: PageInk }, box: PageBox) {
+  let known = viewCache.get(page);
+  if (!known) { known = new Map(); viewCache.set(page, known); }
+  const key = box.join(",");
+  let views = known.get(key);
+  if (!views) { views = computeViews(page, box); known.set(key, views); }
+  return views;
+}
+function computeViews(page: { width: number; height: number; ink?: PageInk }, box: PageBox) {
   // Worked out for the visible part (below the top bar, above the caption band); `y` is its top, turned into the view top at the end.
   const ratio = WIDTH / (SAFE_HEIGHT - TOP_BAR);
   const toView = (v: PageView): PageView => ({ ...v, y: v.y - (TOP_BAR * v.w) / WIDTH });
   const pad = page.width * BOX_PAD;
   const x0 = clamp(box[0] * page.width - pad, 0, page.width), x1 = clamp(box[2] * page.width + pad, 0, page.width);
-  const y0 = clamp(box[1] * page.height - pad, 0, page.height), y1 = clamp(box[3] * page.height + pad, 0, page.height);
-  const boxW = x1 - x0, boxH = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  let y0 = clamp(box[1] * page.height - pad, 0, page.height), y1 = clamp(box[3] * page.height + pad, 0, page.height);
   const ink = page.ink;
-  const fit = Math.max(boxW, boxH * ratio);
   // Ink along every row of the small copy between x and x + w (fraction of edge pixels); rows at the page edge count as clean.
   const rowInk = (x: number, w: number) => {
     if (!ink) return null;
@@ -114,6 +121,16 @@ export function pageViews(page: { width: number; height: number; ink?: PageInk }
     if (r <= 1 || r >= ink.h - 2) return 0;
     return Math.max(rows[r - 1], rows[r], rows[r + 1]);
   };
+  // The box's own top and bottom move to the nearest clean gap (mostly outward), so the spotlight never crosses a line.
+  if (ink) {
+    const rows = rowInk(x0, x1 - x0), step = 1 / ink.scale;
+    const snap = (from: number, lo: number, hi: number) => { let best = from, cost = edgeAt(rows, from) + 1e-9; for (let y = lo; y <= hi; y += step) { const c = edgeAt(rows, y) + 0.00002 * Math.abs(y - from); if (c < cost) { cost = c; best = y; } } return best; };
+    y0 = snap(y0, Math.max(0, y0 - page.height * 0.03), Math.min(y1, y0 + page.height * 0.008));
+    y1 = snap(y1, Math.max(y0, y1 - page.height * 0.008), Math.min(page.height, y1 + page.height * 0.03));
+  }
+  const boxW = x1 - x0, boxH = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const frame = { x0, y0, x1, y1 };
+  const fit = Math.max(boxW, boxH * ratio);
   if (fit <= page.width) {
     let best: PageView = { x: clamp(cx - fit / 2, 0, page.width - fit), y: clamp(cy - fit / ratio / 2, 0, Math.max(0, page.height - fit / ratio)), w: fit };
     if (ink) {
@@ -134,19 +151,19 @@ export function pageViews(page: { width: number; height: number; ink?: PageInk }
         if (w >= page.width) break;
       }
     }
-    return { start: toView(best), end: toView(best), pan: false };
+    return { start: toView(best), end: toView(best), pan: false, frame };
   }
   const w = page.width, safe = w / ratio, rows = rowInk(0, w);
   const pick = (lo: number, hi: number) => { let bestY = (lo + hi) / 2, bestCost = Infinity; for (let y = lo; y <= hi; y += ink ? 1 / ink.scale : hi - lo + 1) { const c = edgeAt(rows, y); if (c < bestCost - 1e-9) { bestCost = c; bestY = y; } } return bestY; };
   const top = pick(Math.max(0, y0 - safe * 0.15), y0);
   const bottom = pick(y1, Math.min(page.height, y1 + safe * 0.15));
-  return { start: toView({ x: 0, y: top, w }), end: toView({ x: 0, y: Math.max(top, bottom - safe), w }), pan: true };
+  return { start: toView({ x: 0, y: top, w }), end: toView({ x: 0, y: Math.max(top, bottom - safe), w }), pan: true, frame };
 }
 
-/** The box (plus padding) on screen for a view, for the spotlight. */
-function boxOnScreen(page: { width: number; height: number }, view: PageView, box: PageBox) {
-  const scale = WIDTH / view.w, pad = page.width * BOX_PAD;
-  return { x0: (box[0] * page.width - pad - view.x) * scale, y0: (box[1] * page.height - pad - view.y) * scale, x1: (box[2] * page.width + pad - view.x) * scale, y1: (box[3] * page.height + pad - view.y) * scale };
+/** The framed part (page pixels, already padded and snapped) on screen for a view, for the spotlight. */
+function boxOnScreen(view: PageView, frame: { x0: number; y0: number; x1: number; y1: number }) {
+  const scale = WIDTH / view.w;
+  return { x0: (frame.x0 - view.x) * scale, y0: (frame.y0 - view.y) * scale, x1: (frame.x1 - view.x) * scale, y1: (frame.y1 - view.y) * scale };
 }
 
 /** Spotlight on the part being read: the rest of the page dims a little and a highlighter line frames the box. */
@@ -164,7 +181,7 @@ async function viewImage(page: PagePicture, view: PageView, box?: PageBox, spotl
   const px1 = clamp(view.x + view.w, 0, page.width), py1 = clamp(view.y + height, 0, page.height);
   const left = Math.round((px0 - view.x) * scale), top = Math.round((py0 - view.y) * scale);
   const w = Math.min(WIDTH - left, Math.round((px1 - px0) * scale)), h = Math.min(HEIGHT - top, Math.round((py1 - py0) * scale));
-  const light = box ? spotlightSvg(boxOnScreen(page, view, box), spotlight) : null;
+  const light = box ? spotlightSvg(boxOnScreen(view, pageViews(page, box).frame), spotlight) : null;
   const extra: OverlayOptions[] = light ? [{ input: light, left: 0, top: 0 }] : [];
   if (w < 2 || h < 2) return sharp(page.blurred).composite(extra).png().toBuffer();
   const region = { left: Math.floor(px0), top: Math.floor(py0), width: 0, height: 0 };
