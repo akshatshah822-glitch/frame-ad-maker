@@ -1,7 +1,8 @@
 // Flipbook page slides (visual = page), exam-question (pedagogy) path only.
 // A whole booklet page sits on a blurred, darkened copy of itself. The camera frames the part being read (the row's
 // box): rows on the same page glide from the previous box to the new one; a new page slides in from the right while the
-// old one slides out. One English caption sits at the bottom. Every frame is composed with sharp from the page itself.
+// old one slides out. One caption sits at the bottom (labels in Gujarati when the caption is Gujarati). While a row holds,
+// the camera drifts in slowly, the caption's highlight sweeps in, and a thin bar at the top shows how far the video is. Every frame is composed with sharp from the page itself.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp, { type OverlayOptions } from "sharp";
@@ -20,7 +21,17 @@ const MARGIN = 40;
 const PAD = 22;
 const FPS = 12;
 const TRANSITION_SECONDS = 1.2;
-const FONT = "Inter, 'Noto Sans', Arial, sans-serif";
+const FONT = "Inter, 'Noto Sans Gujarati', 'Gujarati Sangam MN', 'Noto Sans', Arial, sans-serif";
+/** Hold frames per second (the slow drift), how far in the drift starts (fraction of the full fit), and the highlight sweep. */
+const HOLD_FPS = 6;
+const DRIFT = 0.965;
+const SWEEP_SECONDS = 0.6;
+const GUJARATI = /[\u0A80-\u0AFF]/;
+/** A label in Gujarati when the text it sits with is Gujarati. */
+const label = (text: string, english: string, gujarati: string) => (GUJARATI.test(text) ? gujarati : english);
+/** Where a row sits in the whole video (0–1), for the progress bar. */
+export type PageProgress = { from: number; to: number };
+export type PageFrameOptions = { zoom?: number; sweep?: number; progress?: number };
 const WHOLE: PageBox = [0, 0, 1, 1];
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
@@ -42,12 +53,12 @@ export async function loadPagePictures(files: Iterable<string>, directory = peda
 }
 
 /** Where the page sits for a box: the scale and top-left that fit the box inside the view above the caption band. */
-export function pageCamera(page: { width: number; height: number }, box: PageBox) {
+export function pageCamera(page: { width: number; height: number }, box: PageBox, zoom = 1) {
   const viewW = WIDTH - 2 * MARGIN;
   const viewH = HEIGHT - CAPTION_BAND - 2 * MARGIN;
   const boxW = (box[2] - box[0]) * page.width;
   const boxH = (box[3] - box[1]) * page.height;
-  const scale = Math.min(viewW / boxW, viewH / boxH);
+  const scale = Math.min(viewW / boxW, viewH / boxH) * zoom;
   const centerX = ((box[0] + box[2]) / 2) * page.width;
   const centerY = ((box[1] + box[3]) / 2) * page.height;
   return { scale, x: WIDTH / 2 - centerX * scale, y: MARGIN + viewH / 2 - centerY * scale };
@@ -97,7 +108,9 @@ export async function textWidth(text: string, size: number, weight: number) {
 }
 
 /** Text runs drawn left to right with *starred* runs on a highlighter mark; returns the SVG. */
-async function markedText(text: string, x: number, baseline: number, size: number, colors: { plain: string; mark: string; marker: string; markerOpacity: number }, weights = { plain: 700, mark: 800 }) {
+let clipId = 0;
+/** `sweep` (0–1) draws the highlighter across the starred words: covered letters turn dark, the rest stay in marker colour. */
+async function markedText(text: string, x: number, baseline: number, size: number, colors: { plain: string; mark: string; marker: string; markerOpacity: number }, weights = { plain: 700, mark: 800 }, sweep = 1) {
   let cursor = x;
   const marks: string[] = [];
   const spans: string[] = [];
@@ -105,8 +118,16 @@ async function markedText(text: string, x: number, baseline: number, size: numbe
     const weight = run.mark ? weights.mark : weights.plain;
     const width = await textWidth(run.text, size, weight);
     // The marker covers the whole height of the words, so dark highlighted text never sits on the dark band.
-    if (run.mark) marks.push(`<rect x="${(cursor - 8).toFixed(1)}" y="${(baseline - size * 0.86).toFixed(1)}" width="${(width + 16).toFixed(1)}" height="${(size * 1.12).toFixed(1)}" rx="8" fill="${colors.marker}" fill-opacity="${colors.markerOpacity}"/>`);
-    spans.push(`<text x="${cursor.toFixed(1)}" y="${baseline}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="${run.mark ? colors.mark : colors.plain}" xml:space="preserve">${escapeXml(run.text)}</text>`);
+    const span = (fill: string, extra = "") => `<text x="${cursor.toFixed(1)}" y="${baseline}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="${fill}" xml:space="preserve"${extra}>${escapeXml(run.text)}</text>`;
+    if (run.mark && sweep < 1) {
+      const id = `m${clipId++}`, w = Math.max(0, (width + 16) * sweep);
+      const rect = `x="${(cursor - 8).toFixed(1)}" y="${(baseline - size * 0.86).toFixed(1)}" width="${w.toFixed(1)}" height="${(size * 1.12).toFixed(1)}"`;
+      marks.push(`<clipPath id="${id}"><rect ${rect}/></clipPath><rect ${rect} rx="8" fill="${colors.marker}" fill-opacity="${colors.markerOpacity}"/>`);
+      spans.push(span(colors.marker), span(colors.mark, ` clip-path="url(#${id})"`));
+    } else {
+      if (run.mark) marks.push(`<rect x="${(cursor - 8).toFixed(1)}" y="${(baseline - size * 0.86).toFixed(1)}" width="${(width + 16).toFixed(1)}" height="${(size * 1.12).toFixed(1)}" rx="8" fill="${colors.marker}" fill-opacity="${colors.markerOpacity}"/>`);
+      spans.push(span(run.mark ? colors.mark : colors.plain));
+    }
     cursor += width;
   }
   return marks.join("") + spans.join("");
@@ -117,23 +138,29 @@ export function keyPointRuns(text: string) {
   return text.split("*").map((part, index) => ({ text: part, mark: index % 2 === 1 })).filter((run) => run.text);
 }
 
-/** The bottom band: a KEY POINT label and the row's point, its *starred* words highlighted. */
-async function captionSvg(caption: string, opacity: number) {
+/** The bottom band: a KEY POINT (મુખ્ય મુદ્દો) label and the row's point, its *starred* words highlighted. */
+async function captionSvg(caption: string, opacity: number, sweep = 1) {
   const text = caption.trim();
   const band = `<rect x="0" y="${HEIGHT - CAPTION_BAND}" width="${WIDTH}" height="${CAPTION_BAND}" fill="#0b1020" fill-opacity="0.88"/>`;
   if (!text) return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${band}</svg>`);
   const size = text.replaceAll("*", "").length > 48 ? 46 : 54;
-  const label = `<rect x="80" y="${HEIGHT - CAPTION_BAND + 22}" width="170" height="38" rx="19" fill="#ffd166"/><text x="165" y="${HEIGHT - CAPTION_BAND + 48}" text-anchor="middle" font-family="${FONT}" font-size="22" font-weight="800" letter-spacing="2" fill="#0b1020">KEY POINT</text>`;
-  const line = await markedText(text, 84, HEIGHT - 34, size, { plain: "#f4f6fb", mark: "#0b1020", marker: "#ffd166", markerOpacity: 1 });
-  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${band}<g opacity="${opacity.toFixed(3)}">${label}${line}</g></svg>`);
+  const pill = `<rect x="80" y="${HEIGHT - CAPTION_BAND + 22}" width="170" height="38" rx="19" fill="#ffd166"/><text x="165" y="${HEIGHT - CAPTION_BAND + 48}" text-anchor="middle" font-family="${FONT}" font-size="22" font-weight="800" letter-spacing="${GUJARATI.test(text) ? 0 : 2}" fill="#0b1020">${label(text, "KEY POINT", "મુખ્ય મુદ્દો")}</text>`;
+  const line = await markedText(text, 84, HEIGHT - 34, size, { plain: "#f4f6fb", mark: "#0b1020", marker: "#ffd166", markerOpacity: 1 }, undefined, sweep);
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${band}<g opacity="${opacity.toFixed(3)}">${pill}${line}</g></svg>`);
+}
+
+/** A thin bar along the top edge: how far into the video this frame is. */
+function progressBar(progress: number) {
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="8"><rect width="${WIDTH}" height="8" fill="#ffffff" fill-opacity="0.14"/><rect width="${(WIDTH * clamp(progress)).toFixed(1)}" height="8" fill="#ffd166"/></svg>`);
 }
 
 /** One frame. `previous` (another page sliding out) is only set while a new page comes in. */
-export async function pageFrame(pages: Map<string, PagePicture | null>, state: PageState, box: PageBox, captionOpacity: number, slide?: { previous: PageState; t: number }) {
+export async function pageFrame(pages: Map<string, PagePicture | null>, state: PageState, box: PageBox, captionOpacity: number, slide?: { previous: PageState; t: number }, options: PageFrameOptions = {}) {
+  const bar: OverlayOptions[] = options.progress === undefined ? [] : [{ input: progressBar(options.progress), left: 0, top: 0 }];
   const page = pages.get(state.file);
   if (!page) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><rect width="100%" height="100%" fill="#0b1020"/><text x="960" y="520" text-anchor="middle" font-family="${FONT}" font-size="40" fill="#8a96ad">Missing page: ${escapeXml(state.file)}</text></svg>`;
-    return sharp(Buffer.from(svg)).composite([{ input: await captionSvg(state.caption, 1) }]).png().toBuffer();
+    return sharp(Buffer.from(svg)).composite([{ input: await captionSvg(state.caption, 1) }, ...bar]).png().toBuffer();
   }
   const layers: OverlayOptions[] = [];
   const t = slide ? easeInOut(slide.t) : 1;
@@ -141,38 +168,46 @@ export async function pageFrame(pages: Map<string, PagePicture | null>, state: P
   if (slide && outgoing) {
     layers.push(...await pageLayer(outgoing, pageCamera(outgoing, slide.previous.box), slide.previous.box, -t * WIDTH));
   }
-  layers.push(...await pageLayer(page, pageCamera(page, box), box, slide ? (1 - t) * WIDTH : 0));
-  layers.push({ input: await captionSvg(state.caption, captionOpacity), left: 0, top: 0 });
+  layers.push(...await pageLayer(page, pageCamera(page, box, options.zoom ?? 1), box, slide ? (1 - t) * WIDTH : 0));
+  layers.push({ input: await captionSvg(state.caption, captionOpacity, options.sweep ?? 1), left: 0, top: 0 }, ...bar);
   return sharp(page.blurred).composite(layers).png().toBuffer();
 }
 
-/** All frames of one row: a ~1.2 s move (glide on the same page, slide for a new page), then the framed part holds. */
-export async function createPageFrames(pages: Map<string, PagePicture | null>, state: PageState, previous: PageState | null, allocatedDuration: number) {
+/** All frames of one row: a ~1.2 s move (glide on the same page, slide for a new page), then a hold in which the camera
+ * drifts in slowly (from 96.5% to 100% of the fit, so nothing is ever cut) and the caption's highlight sweeps in. */
+export async function createPageFrames(pages: Map<string, PagePicture | null>, state: PageState, previous: PageState | null, allocatedDuration: number, progress?: PageProgress) {
   const samePage = previous?.file === state.file;
   const fromBox = samePage ? previous!.box : WHOLE;
-  const moving = !samePage || fromBox.some((value, index) => Math.abs(value - state.box[index]) > 1e-6);
-  const seconds = moving ? Math.min(TRANSITION_SECONDS, allocatedDuration * 0.5) : 0;
+  const at = (seconds: number) => (progress ? progress.from + (progress.to - progress.from) * clamp(seconds / Math.max(allocatedDuration, 1e-6)) : undefined);
+  // Always a move: even on the same box the previous hold ended fully drifted in, so the camera eases back out first.
+  const seconds = Math.min(TRANSITION_SECONDS, allocatedDuration * 0.5);
   const count = Math.max(1, Math.round(seconds * FPS));
   const frames: { png: Buffer; duration: number }[] = [];
-  if (moving) {
-    for (let index = 0; index < count; index += 1) {
-      const t = (index + 1) / count;
-      // A new page arrives showing the whole page, then the camera moves into the box during the second half.
-      const png = samePage
-        ? await pageFrame(pages, state, mixBox(fromBox, state.box, easeInOut(t)), 1)
-        : previous
-          ? await pageFrame(pages, state, mixBox(WHOLE, state.box, easeInOut(clamp(t * 2 - 1))), clamp(t * 2 - 1), t < 0.5 ? { previous, t: t * 2 } : undefined)
-          : await pageFrame(pages, state, mixBox(WHOLE, state.box, easeInOut(t)), t);
-      frames.push({ png, duration: 1 / FPS });
-    }
+  for (let index = 0; index < count; index += 1) {
+    const t = (index + 1) / count;
+    const progressNow = at(frames.length / FPS);
+    // A new page arrives showing the whole page, then the camera moves into the box during the second half.
+    const png = samePage
+      ? await pageFrame(pages, state, mixBox(fromBox, state.box, easeInOut(t)), 1, undefined, { zoom: 1 + (DRIFT - 1) * easeInOut(t), sweep: 0, progress: progressNow })
+      : previous
+        ? await pageFrame(pages, state, mixBox(WHOLE, state.box, easeInOut(clamp(t * 2 - 1))), clamp(t * 2 - 1), t < 0.5 ? { previous, t: t * 2 } : undefined, { zoom: DRIFT, sweep: 0, progress: progressNow })
+        : await pageFrame(pages, state, mixBox(WHOLE, state.box, easeInOut(t)), t, undefined, { zoom: DRIFT, sweep: 0, progress: progressNow });
+    frames.push({ png, duration: 1 / FPS });
   }
-  const held = Math.max(1 / FPS, allocatedDuration - frames.length / FPS);
-  frames.push({ png: await pageFrame(pages, state, state.box, 1), duration: held });
+  const start = frames.length / FPS;
+  const held = Math.max(1 / FPS, allocatedDuration - start);
+  const holdCount = Math.max(1, Math.round(held * HOLD_FPS));
+  for (let index = 0; index < holdCount; index += 1) {
+    const elapsed = (index / holdCount) * held;
+    const zoom = DRIFT + (1 - DRIFT) * easeInOut(holdCount === 1 ? 1 : index / (holdCount - 1));
+    const sweep = clamp((elapsed + 1 / HOLD_FPS) / SWEEP_SECONDS);
+    frames.push({ png: await pageFrame(pages, state, state.box, 1, undefined, { zoom, sweep, progress: at(start + elapsed) }), duration: held / holdCount });
+  }
   return frames;
 }
 
 /** Recap board (visual = keypoints): a notebook card over the last page's blurred background; points appear one by one. */
-export async function keyPointsFrame(background: PagePicture | null | undefined, title: string, points: string[], shown: number) {
+export async function keyPointsFrame(background: PagePicture | null | undefined, title: string, points: string[], shown: number, progress?: number) {
   const cardX = 140, cardY = 50, cardW = WIDTH - 280, cardH = HEIGHT - 100;
   const top = cardY + 250;
   const step = Math.min(118, (cardY + cardH - 70 - top) / Math.max(1, points.length - 1));
@@ -191,19 +226,20 @@ export async function keyPointsFrame(background: PagePicture | null | undefined,
     <rect x="${cardX}" y="${cardY}" width="${cardW}" height="${cardH}" rx="26" fill="#fbf7ec"/>
     <rect x="${cardX + 66}" y="${cardY}" width="3" height="${cardH}" fill="#e8a0a0" fill-opacity="0.7"/>
     <rect x="${cardX + 96}" y="${cardY + 44}" width="200" height="42" rx="21" fill="#ffd166"/>
-    <text x="${cardX + 196}" y="${cardY + 72}" text-anchor="middle" font-family="${FONT}" font-size="23" font-weight="800" letter-spacing="2" fill="#0b1020">REMEMBER</text>
+    <text x="${cardX + 196}" y="${cardY + 72}" text-anchor="middle" font-family="${FONT}" font-size="23" font-weight="800" letter-spacing="${GUJARATI.test(title) ? 0 : 2}" fill="#0b1020">${label(title, "REMEMBER", "યાદ રાખો")}</text>
     <text x="${cardX + 96}" y="${cardY + 160}" font-family="${FONT}" font-size="60" font-weight="800" fill="#0b1020">${escapeXml(title)}</text>
     ${rows.join("")}</svg>`;
   const base = background ? sharp(background.blurred) : sharp({ create: { width: WIDTH, height: HEIGHT, channels: 3, background: "#0b1020" } });
-  return base.composite([{ input: Buffer.from(svg), left: 0, top: 0 }]).png().toBuffer();
+  return base.composite([{ input: Buffer.from(svg), left: 0, top: 0 }, ...(progress === undefined ? [] : [{ input: progressBar(progress), left: 0, top: 0 }])]).png().toBuffer();
 }
 
 /** All frames of a recap row: the points appear one by one over at most 60% of the line, then the full board holds. */
-export async function createKeyPointsFrames(background: PagePicture | null | undefined, title: string, points: string[], allocatedDuration: number) {
+export async function createKeyPointsFrames(background: PagePicture | null | undefined, title: string, points: string[], allocatedDuration: number, progress?: PageProgress) {
+  const at = (seconds: number) => (progress ? progress.from + (progress.to - progress.from) * clamp(seconds / Math.max(allocatedDuration, 1e-6)) : undefined);
   const seconds = Math.min(points.length * 0.6, allocatedDuration * 0.6);
   const count = Math.max(1, Math.round(seconds * FPS));
   const frames: { png: Buffer; duration: number }[] = [];
-  for (let index = 0; index < count; index += 1) frames.push({ png: await keyPointsFrame(background, title, points, ((index + 1) / count) * points.length), duration: 1 / FPS });
-  frames.push({ png: await keyPointsFrame(background, title, points, points.length), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
+  for (let index = 0; index < count; index += 1) frames.push({ png: await keyPointsFrame(background, title, points, ((index + 1) / count) * points.length, at(index / FPS)), duration: 1 / FPS });
+  frames.push({ png: await keyPointsFrame(background, title, points, points.length, at(count / FPS)), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
   return frames;
 }

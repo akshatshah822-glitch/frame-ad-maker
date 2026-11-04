@@ -72,6 +72,8 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   }
 
   const totalDuration = timeline.totalDuration;
+  /** Where a row sits in the whole video, for the page slides' progress bar. */
+  const rowProgress = (row: { adjustedGeneratedTime: number; allocatedDuration: number }) => ({ from: row.adjustedGeneratedTime / Math.max(totalDuration, 1e-6), to: (row.adjustedGeneratedTime + row.allocatedDuration) / Math.max(totalDuration, 1e-6) });
   const concatLines: string[] = [];
   let lastFrame = "";
   let crossfades = 0;
@@ -339,7 +341,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         if (visual.kind === "keypoints") {
           // The recap board sits on the blurred background of the last page shown before it.
           const lastPage = timeline.rows.slice(0, index).reverse().map((r) => r.layout === "visual" ? parsePedagogyVisual(r.visual, r.visualData) : null).find((v) => v?.kind === "page");
-          const frames = await createKeyPointsFrames(lastPage?.kind === "page" ? pages.get(lastPage.file) : null, visual.title, visual.points, row.allocatedDuration);
+          const frames = await createKeyPointsFrames(lastPage?.kind === "page" ? pages.get(lastPage.file) : null, visual.title, visual.points, row.allocatedDuration, rowProgress(row));
           for (const [frame, { png, duration }] of frames.entries()) {
             const framePath = `${framePrefix}-k${String(frame).padStart(3, "0")}.png`;
             await writeFile(framePath, png);
@@ -349,7 +351,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
         } else if (visual.kind === "page") {
           const before = previous?.layout === "visual" ? parsePedagogyVisual(previous.visual, previous.visualData) : null;
           const from: PageState | null = before?.kind === "page" ? { file: before.file, box: before.box, caption: before.caption || previous!.board } : null;
-          const frames = await createPageFrames(pages, { file: visual.file, box: visual.box, caption: visual.caption || row.board }, from, row.allocatedDuration);
+          const frames = await createPageFrames(pages, { file: visual.file, box: visual.box, caption: visual.caption || row.board }, from, row.allocatedDuration, rowProgress(row));
           for (const [frame, { png, duration }] of frames.entries()) {
             const framePath = `${framePrefix}-p${String(frame).padStart(3, "0")}.png`;
             await writeFile(framePath, png);
