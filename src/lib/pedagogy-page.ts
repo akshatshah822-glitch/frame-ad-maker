@@ -19,6 +19,8 @@ const HEIGHT = 1080;
 /** The caption band over the bottom of the screen; the box being read always sits whole above it. */
 const CAPTION_BAND = 190;
 const SAFE_HEIGHT = HEIGHT - CAPTION_BAND;
+/** Height of the running-track bar along the top; the box sits whole below it too. */
+const TOP_BAR = 58;
 /** Padding around the box (fraction of the page width). */
 const BOX_PAD = 0.02;
 
@@ -89,7 +91,9 @@ const mixView = (a: PageView, b: PageView, t: number): PageView => ({ x: a.x + (
  * edges cut through the least ink is chosen, so no neighbouring line is shown cut in half. The view holds still. When the box
  * is too tall to fit even at the full page width, the camera pans down it, starting and ending on a gap. */
 export function pageViews(page: { width: number; height: number; ink?: PageInk }, box: PageBox) {
-  const ratio = WIDTH / SAFE_HEIGHT;
+  // Worked out for the visible part (below the top bar, above the caption band); `y` is its top, turned into the view top at the end.
+  const ratio = WIDTH / (SAFE_HEIGHT - TOP_BAR);
+  const toView = (v: PageView): PageView => ({ ...v, y: v.y - (TOP_BAR * v.w) / WIDTH });
   const pad = page.width * BOX_PAD;
   const x0 = clamp(box[0] * page.width - pad, 0, page.width), x1 = clamp(box[2] * page.width + pad, 0, page.width);
   const y0 = clamp(box[1] * page.height - pad, 0, page.height), y1 = clamp(box[3] * page.height + pad, 0, page.height);
@@ -130,13 +134,13 @@ export function pageViews(page: { width: number; height: number; ink?: PageInk }
         if (w >= page.width) break;
       }
     }
-    return { start: best, end: best, pan: false };
+    return { start: toView(best), end: toView(best), pan: false };
   }
   const w = page.width, safe = w / ratio, rows = rowInk(0, w);
   const pick = (lo: number, hi: number) => { let bestY = (lo + hi) / 2, bestCost = Infinity; for (let y = lo; y <= hi; y += ink ? 1 / ink.scale : hi - lo + 1) { const c = edgeAt(rows, y); if (c < bestCost - 1e-9) { bestCost = c; bestY = y; } } return bestY; };
   const top = pick(Math.max(0, y0 - safe * 0.15), y0);
   const bottom = pick(y1, Math.min(page.height, y1 + safe * 0.15));
-  return { start: { x: 0, y: top, w }, end: { x: 0, y: Math.max(top, bottom - safe), w }, pan: true };
+  return { start: toView({ x: 0, y: top, w }), end: toView({ x: 0, y: Math.max(top, bottom - safe), w }), pan: true };
 }
 
 /** The box (plus padding) on screen for a view, for the spotlight. */
@@ -238,7 +242,7 @@ function progressBar(progress: number) {
   // A simple runner: head, body leaning forward, arms and legs mid-stride.
   const runner = `<g transform="translate(${x.toFixed(1)} ${y - 4})" stroke="#ffd166" stroke-width="4" stroke-linecap="round" fill="none"><circle cx="3" cy="-16" r="5" fill="#ffd166" stroke="none"/><path d="M1 -10 L-3 4"/><path d="M0 -7 L8 -2 M0 -7 L-8 -3"/><path d="M-3 4 L5 10 L3 16 M-3 4 L-9 12"/></g>`;
   const flag = `<g transform="translate(${right + 18} ${y})"><line x1="0" y1="-16" x2="0" y2="12" stroke="#ffffff" stroke-width="3"/><path d="M0 -16 h22 v12 h-22z" fill="#ffffff"/><path d="M0 -16h5.5v6h-5.5zM11 -16h5.5v6h-5.5zM5.5 -10h5.5v6h-5.5zM16.5 -10h5.5v6h-5.5z" fill="#0b1020"/><text x="34" y="2" font-family="${FONT}" font-size="15" font-weight="800" fill="#ffffff">5 કિમી</text></g>`;
-  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${h + 12}"><rect width="${WIDTH}" height="${h + 12}" fill="#0b1020" fill-opacity="0.62"/><line x1="${left}" y1="${y}" x2="${right}" y2="${y}" stroke="#ffffff" stroke-opacity="0.28" stroke-width="6" stroke-linecap="round"/><line x1="${left}" y1="${y}" x2="${x.toFixed(1)}" y2="${y}" stroke="#ffd166" stroke-width="6" stroke-linecap="round"/>${ticks}${flag}${runner}</svg>`);
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${h + 12}"><rect width="${WIDTH}" height="${h + 12}" fill="#0b1020" fill-opacity="0.94"/><line x1="${left}" y1="${y}" x2="${right}" y2="${y}" stroke="#ffffff" stroke-opacity="0.28" stroke-width="6" stroke-linecap="round"/><line x1="${left}" y1="${y}" x2="${x.toFixed(1)}" y2="${y}" stroke="#ffd166" stroke-width="6" stroke-linecap="round"/>${ticks}${flag}${runner}</svg>`);
 }
 
 /** One frame: the page through `view`, or (while a new page comes in) the old page sliding out left and the new one in. */
