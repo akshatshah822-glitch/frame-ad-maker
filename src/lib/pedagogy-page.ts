@@ -1,6 +1,6 @@
 // Flipbook page slides (visual = page), exam-question (pedagogy) path only.
 // A whole booklet page sits on a blurred, darkened copy of itself. The camera frames the part being read (the row's
-// box): rows on the same page glide from the previous box to the new one; a new page slides in from the right while the
+// box) and the page fills the whole screen: rows on the same page glide from the previous box to the new one; a new page slides in from the right while the
 // old one slides out. One caption sits at the bottom (labels in Gujarati when the caption is Gujarati). While a row holds,
 // the camera drifts in slowly, the caption's highlight sweeps in, and a thin bar at the top shows how far the video is. Every frame is composed with sharp from the page itself.
 import { readFile } from "node:fs/promises";
@@ -14,25 +14,24 @@ export type PageState = { file: string; box: PageBox; caption: string };
 
 const WIDTH = 1920;
 const HEIGHT = 1080;
-/** Space kept clear at the bottom for the caption band, and the margin around the framed part. */
+/** The caption band over the bottom of the screen; the box being read always sits whole above it. */
 const CAPTION_BAND = 190;
-const MARGIN = 40;
-/** Padding (screen pixels) shown around the framed part of the page. */
-const PAD = 22;
+const SAFE_HEIGHT = HEIGHT - CAPTION_BAND;
+/** Padding around the box (fraction of the page width), and how much wider the drift starts. */
+const BOX_PAD = 0.02;
+const DRIFT_WIDER = 1.06;
 const FPS = 12;
 const TRANSITION_SECONDS = 1.2;
 const FONT = "Inter, 'Noto Sans Gujarati', 'Gujarati Sangam MN', 'Noto Sans', Arial, sans-serif";
 /** Hold frames per second (the slow drift), how far in the drift starts (fraction of the full fit), and the highlight sweep. */
 const HOLD_FPS = 6;
-const DRIFT = 0.965;
 const SWEEP_SECONDS = 0.6;
 const GUJARATI = /[\u0A80-\u0AFF]/;
 /** A label in Gujarati when the text it sits with is Gujarati. */
 const label = (text: string, english: string, gujarati: string) => (GUJARATI.test(text) ? gujarati : english);
 /** Where a row sits in the whole video (0–1), for the progress bar. */
 export type PageProgress = { from: number; to: number };
-export type PageFrameOptions = { zoom?: number; sweep?: number; progress?: number };
-const WHOLE: PageBox = [0, 0, 1, 1];
+export type PageFrameOptions = { sweep?: number; progress?: number };
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
@@ -52,41 +51,49 @@ export async function loadPagePictures(files: Iterable<string>, directory = peda
   return pages;
 }
 
-/** Where the page sits for a box: the scale and top-left that fit the box inside the view above the caption band. */
-export function pageCamera(page: { width: number; height: number }, box: PageBox, zoom = 1) {
-  const viewW = WIDTH - 2 * MARGIN;
-  const viewH = HEIGHT - CAPTION_BAND - 2 * MARGIN;
-  const boxW = (box[2] - box[0]) * page.width;
-  const boxH = (box[3] - box[1]) * page.height;
-  const scale = Math.min(viewW / boxW, viewH / boxH) * zoom;
-  const centerX = ((box[0] + box[2]) / 2) * page.width;
-  const centerY = ((box[1] + box[3]) / 2) * page.height;
-  return { scale, x: WIDTH / 2 - centerX * scale, y: MARGIN + viewH / 2 - centerY * scale };
+/** A camera view on a page, in page pixels: top-left and width (its height follows the 16:9 screen). */
+export type PageView = { x: number; y: number; w: number };
+const viewHeight = (view: PageView) => (view.w * HEIGHT) / WIDTH;
+const mixView = (a: PageView, b: PageView, t: number): PageView => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, w: a.w + (b.w - a.w) * t });
+
+/** Where the camera starts and ends for a box. The page fills the whole screen; the box (plus a little padding) always sits
+ * whole in the part above the caption band, widened to that part's shape so no blank margin shows. When the box is too tall
+ * to fit even at the full page width, the camera pans down it instead (start: its top, end: its bottom), so nothing is cut. */
+export function pageViews(page: { width: number; height: number }, box: PageBox) {
+  const ratio = WIDTH / SAFE_HEIGHT;
+  const pad = page.width * BOX_PAD;
+  const x0 = clamp(box[0] * page.width - pad, 0, page.width), x1 = clamp(box[2] * page.width + pad, 0, page.width);
+  const y0 = clamp(box[1] * page.height - pad, 0, page.height), y1 = clamp(box[3] * page.height + pad, 0, page.height);
+  const boxW = x1 - x0, boxH = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  // `w` is the view width; the safe part shows w / ratio of page height.
+  const place = (w: number, centerY: number): PageView => {
+    const safe = w / ratio;
+    return { x: clamp(cx - w / 2, 0, Math.max(0, page.width - w)), y: clamp(centerY - safe / 2, 0, Math.max(0, page.height - safe)), w };
+  };
+  const fit = Math.max(boxW, boxH * ratio);
+  if (fit <= page.width) {
+    const end = place(fit, cy);
+    // The drift: start a little wider (when the page has room) and close in on the box while the line is spoken.
+    const start = place(Math.min(page.width, fit * DRIFT_WIDER), cy);
+    return { start, end, pan: false };
+  }
+  const w = page.width, safe = w / ratio;
+  return { start: { x: 0, y: y0, w }, end: { x: 0, y: Math.max(y0, y1 - safe), w }, pan: true };
 }
 
-const mixBox = (a: PageBox, b: PageBox, t: number): PageBox => [0, 1, 2, 3].map((i) => a[i] + (b[i] - a[i]) * t) as PageBox;
-
-/** The framed part of the page (the box, plus a little padding), drawn at a camera as a rounded card with a shadow.
- * Only the box is shown, so no line of the page is ever cut half-way at the edge of the view. */
-async function pageLayer(page: PagePicture, camera: { scale: number; x: number; y: number }, box: PageBox, shiftX = 0) {
-  const pad = PAD / camera.scale;
-  const px0 = clamp(box[0] * page.width - pad, 0, page.width), py0 = clamp(box[1] * page.height - pad, 0, page.height);
-  const px1 = clamp(box[2] * page.width + pad, 0, page.width), py1 = clamp(box[3] * page.height + pad, 0, page.height);
-  const left = camera.x + shiftX + px0 * camera.scale, top = camera.y + py0 * camera.scale;
-  const shownW = (px1 - px0) * camera.scale, shownH = (py1 - py0) * camera.scale;
-  const x0 = Math.max(0, left), y0 = Math.max(0, top);
-  const x1 = Math.min(WIDTH, left + shownW), y1 = Math.min(HEIGHT, top + shownH);
-  if (x1 - x0 < 2 || y1 - y0 < 2) return [];
-  const sx = px0 + (x0 - left) / camera.scale, sy = py0 + (y0 - top) / camera.scale;
-  const sw = (x1 - x0) / camera.scale, sh = (y1 - y0) / camera.scale;
-  const region = { left: Math.floor(clamp(sx, 0, page.width - 1)), top: Math.floor(clamp(sy, 0, page.height - 1)), width: 0, height: 0 };
-  region.width = Math.max(1, Math.min(page.width - region.left, Math.ceil(sw)));
-  region.height = Math.max(1, Math.min(page.height - region.top, Math.ceil(sh)));
-  const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
-  const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" rx="18" fill="#fff"/></svg>`);
-  const input = await sharp(page.full).extract(region).resize(w, h, { fit: "fill" }).composite([{ input: mask, blend: "dest-in" }]).png().toBuffer();
-  const shadow = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><defs><filter id="s" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="18"/></filter></defs><rect x="${Math.round(x0) + 6}" y="${Math.round(y0) + 14}" width="${w}" height="${h}" rx="18" fill="#000" fill-opacity="0.55" filter="url(#s)"/></svg>`);
-  return [{ input: shadow, left: 0, top: 0 }, { input, left: Math.round(x0), top: Math.round(y0) }];
+/** The page seen through a view, filling the screen; anything beyond the page edge shows the blurred page behind. */
+async function viewImage(page: PagePicture, view: PageView) {
+  const scale = WIDTH / view.w, height = viewHeight(view);
+  const px0 = clamp(view.x, 0, page.width), py0 = clamp(view.y, 0, page.height);
+  const px1 = clamp(view.x + view.w, 0, page.width), py1 = clamp(view.y + height, 0, page.height);
+  const left = Math.round((px0 - view.x) * scale), top = Math.round((py0 - view.y) * scale);
+  const w = Math.min(WIDTH - left, Math.round((px1 - px0) * scale)), h = Math.min(HEIGHT - top, Math.round((py1 - py0) * scale));
+  if (w < 2 || h < 2) return sharp(page.blurred).png().toBuffer();
+  const region = { left: Math.floor(px0), top: Math.floor(py0), width: 0, height: 0 };
+  region.width = Math.max(1, Math.min(page.width - region.left, Math.ceil(px1 - px0)));
+  region.height = Math.max(1, Math.min(page.height - region.top, Math.ceil(py1 - py0)));
+  const input = await sharp(page.full).extract(region).resize(w, h, { fit: "fill" }).png().toBuffer();
+  return sharp(page.blurred).composite([{ input, left, top }]).png().toBuffer();
 }
 
 const widths = new Map<string, number>();
@@ -154,57 +161,59 @@ function progressBar(progress: number) {
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="8"><rect width="${WIDTH}" height="8" fill="#ffffff" fill-opacity="0.14"/><rect width="${(WIDTH * clamp(progress)).toFixed(1)}" height="8" fill="#ffd166"/></svg>`);
 }
 
-/** One frame. `previous` (another page sliding out) is only set while a new page comes in. */
-export async function pageFrame(pages: Map<string, PagePicture | null>, state: PageState, box: PageBox, captionOpacity: number, slide?: { previous: PageState; t: number }, options: PageFrameOptions = {}) {
+/** One frame: the page through `view`, or (while a new page comes in) the old page sliding out left and the new one in. */
+export async function pageFrame(pages: Map<string, PagePicture | null>, state: PageState, view: PageView, captionOpacity: number, slide?: { previous: PageState; view: PageView; t: number }, options: PageFrameOptions = {}) {
   const bar: OverlayOptions[] = options.progress === undefined ? [] : [{ input: progressBar(options.progress), left: 0, top: 0 }];
+  const caption: OverlayOptions = { input: await captionSvg(state.caption, captionOpacity, options.sweep ?? 1), left: 0, top: 0 };
   const page = pages.get(state.file);
   if (!page) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><rect width="100%" height="100%" fill="#0b1020"/><text x="960" y="520" text-anchor="middle" font-family="${FONT}" font-size="40" fill="#8a96ad">Missing page: ${escapeXml(state.file)}</text></svg>`;
-    return sharp(Buffer.from(svg)).composite([{ input: await captionSvg(state.caption, 1) }, ...bar]).png().toBuffer();
+    return sharp(Buffer.from(svg)).composite([caption, ...bar]).png().toBuffer();
   }
-  const layers: OverlayOptions[] = [];
-  const t = slide ? easeInOut(slide.t) : 1;
+  const current = await viewImage(page, view);
   const outgoing = slide ? pages.get(slide.previous.file) : null;
-  if (slide && outgoing) {
-    layers.push(...await pageLayer(outgoing, pageCamera(outgoing, slide.previous.box), slide.previous.box, -t * WIDTH));
-  }
-  layers.push(...await pageLayer(page, pageCamera(page, box, options.zoom ?? 1), box, slide ? (1 - t) * WIDTH : 0));
-  layers.push({ input: await captionSvg(state.caption, captionOpacity, options.sweep ?? 1), left: 0, top: 0 }, ...bar);
-  return sharp(page.blurred).composite(layers).png().toBuffer();
+  if (!slide || !outgoing) return sharp(current).composite([caption, ...bar]).png().toBuffer();
+  const shift = Math.round(easeInOut(slide.t) * WIDTH);
+  const layers: OverlayOptions[] = [];
+  if (shift < WIDTH) layers.push({ input: await sharp(await viewImage(outgoing, slide.view)).extract({ left: shift, top: 0, width: WIDTH - shift, height: HEIGHT }).png().toBuffer(), left: 0, top: 0 });
+  if (shift > 0) layers.push({ input: await sharp(current).extract({ left: 0, top: 0, width: shift, height: HEIGHT }).png().toBuffer(), left: WIDTH - shift, top: 0 });
+  return sharp({ create: { width: WIDTH, height: HEIGHT, channels: 3, background: "#0b1020" } }).composite([...layers, caption, ...bar]).png().toBuffer();
 }
 
 /** All frames of one row: a ~1.2 s move (glide on the same page, slide for a new page), then a hold in which the camera
- * drifts in slowly (from 96.5% to 100% of the fit, so nothing is ever cut) and the caption's highlight sweeps in. */
+ * closes in on the box (or pans down a tall one) and the caption's highlight sweeps in. */
 export async function createPageFrames(pages: Map<string, PagePicture | null>, state: PageState, previous: PageState | null, allocatedDuration: number, progress?: PageProgress) {
-  const samePage = previous?.file === state.file;
-  const fromBox = samePage ? previous!.box : WHOLE;
+  const page = pages.get(state.file);
   const at = (seconds: number) => (progress ? progress.from + (progress.to - progress.from) * clamp(seconds / Math.max(allocatedDuration, 1e-6)) : undefined);
-  // Always a move: even on the same box the previous hold ended fully drifted in, so the camera eases back out first.
-  const seconds = Math.min(TRANSITION_SECONDS, allocatedDuration * 0.5);
-  const count = Math.max(1, Math.round(seconds * FPS));
+  const placeholder: PageView = { x: 0, y: 0, w: WIDTH };
+  const views = page ? pageViews(page, state.box) : { start: placeholder, end: placeholder, pan: false };
+  const prevPage = previous ? pages.get(previous.file) : null;
+  const prevEnd = previous && prevPage ? pageViews(prevPage, previous.box).end : null;
+  const samePage = Boolean(previous && previous.file === state.file && prevEnd);
   const frames: { png: Buffer; duration: number }[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const t = (index + 1) / count;
-    const progressNow = at(frames.length / FPS);
-    // A new page arrives showing the whole page, then the camera moves into the box during the second half.
-    const png = samePage
-      ? await pageFrame(pages, state, mixBox(fromBox, state.box, easeInOut(t)), 1, undefined, { zoom: 1 + (DRIFT - 1) * easeInOut(t), sweep: 0, progress: progressNow })
-      : previous
-        ? await pageFrame(pages, state, mixBox(WHOLE, state.box, easeInOut(clamp(t * 2 - 1))), clamp(t * 2 - 1), t < 0.5 ? { previous, t: t * 2 } : undefined, { zoom: DRIFT, sweep: 0, progress: progressNow })
-        : await pageFrame(pages, state, mixBox(WHOLE, state.box, easeInOut(t)), t, undefined, { zoom: DRIFT, sweep: 0, progress: progressNow });
-    frames.push({ png, duration: 1 / FPS });
+  if (previous && prevEnd) {
+    const count = Math.max(1, Math.round(Math.min(TRANSITION_SECONDS, allocatedDuration * 0.5) * FPS));
+    for (let index = 0; index < count; index += 1) {
+      const t = (index + 1) / count;
+      const options = { sweep: 0, progress: at(frames.length / FPS) };
+      const png = samePage
+        ? await pageFrame(pages, state, mixView(prevEnd, views.start, easeInOut(t)), 1, undefined, options)
+        : await pageFrame(pages, state, views.start, clamp(t * 2 - 1), t < 1 ? { previous: previous!, view: prevEnd, t } : undefined, options);
+      frames.push({ png, duration: 1 / FPS });
+    }
   }
   const start = frames.length / FPS;
   const held = Math.max(1 / FPS, allocatedDuration - start);
   const holdCount = Math.max(1, Math.round(held * HOLD_FPS));
   for (let index = 0; index < holdCount; index += 1) {
     const elapsed = (index / holdCount) * held;
-    const zoom = DRIFT + (1 - DRIFT) * easeInOut(holdCount === 1 ? 1 : index / (holdCount - 1));
+    const view = mixView(views.start, views.end, easeInOut(holdCount === 1 ? 1 : index / (holdCount - 1)));
     const sweep = clamp((elapsed + 1 / HOLD_FPS) / SWEEP_SECONDS);
-    frames.push({ png: await pageFrame(pages, state, state.box, 1, undefined, { zoom, sweep, progress: at(start + elapsed) }), duration: held / holdCount });
+    frames.push({ png: await pageFrame(pages, state, view, 1, undefined, { sweep, progress: at(start + elapsed) }), duration: held / holdCount });
   }
   return frames;
 }
+
 
 /** Recap board (visual = keypoints): a notebook card over the last page's blurred background; points appear one by one. */
 export async function keyPointsFrame(background: PagePicture | null | undefined, title: string, points: string[], shown: number, progress?: number) {
