@@ -9,7 +9,9 @@ import sharp, { type OverlayOptions } from "sharp";
 import { pedagogyLogoDirectory } from "@/lib/pedagogy-look-slide";
 
 export type PageBox = [number, number, number, number];
-export type PagePicture = { full: Buffer; blurred: Buffer; width: number; height: number };
+/** Where the page has ink: edge counts on a small grey copy, summed along rows and columns (for placing frame edges in gaps). */
+export type PageInk = { scale: number; w: number; h: number; rows: Uint32Array; cols: Uint32Array };
+export type PagePicture = { full: Buffer; blurred: Buffer; width: number; height: number; ink?: PageInk };
 export type PageState = { file: string; box: PageBox; caption: string };
 
 const WIDTH = 1920;
@@ -17,9 +19,9 @@ const HEIGHT = 1080;
 /** The caption band over the bottom of the screen; the box being read always sits whole above it. */
 const CAPTION_BAND = 190;
 const SAFE_HEIGHT = HEIGHT - CAPTION_BAND;
-/** Padding around the box (fraction of the page width), and how much wider the drift starts. */
+/** Padding around the box (fraction of the page width). */
 const BOX_PAD = 0.02;
-const DRIFT_WIDER = 1.06;
+
 const FPS = 12;
 const TRANSITION_SECONDS = 1.2;
 const FONT = "Inter, 'Noto Sans Gujarati', 'Gujarati Sangam MN', 'Noto Sans', Arial, sans-serif";
@@ -46,10 +48,43 @@ export async function loadPagePictures(files: Iterable<string>, directory = peda
     const full = await sharp(data).rotate().resize({ height: 2600, withoutEnlargement: true }).flatten({ background: "#ffffff" }).png().toBuffer();
     const { width = 1, height = 1 } = await sharp(full).metadata();
     const blurred = await sharp(full).resize(WIDTH, HEIGHT, { fit: "cover" }).blur(38).modulate({ brightness: 0.42, saturation: 0.8 }).png().toBuffer();
-    pages.set(file, { full, blurred, width, height });
+    pages.set(file, { full, blurred, width, height, ink: await inkMap(full, width) });
   }
   return pages;
 }
+
+/** Edge pixels of a page (on a 600 px wide grey copy), as running sums along each row and each column. */
+async function inkMap(full: Buffer, pageWidth: number): Promise<PageInk> {
+  const { data, info } = await sharp(full).resize({ width: 600 }).grayscale().raw().toBuffer({ resolveWithObject: true });
+  const w = info.width, h = info.height;
+  const rows = new Uint32Array(h * (w + 1)), cols = new Uint32Array(w * (h + 1));
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const v = data[y * w + x];
+      const edge = (x ? Math.abs(v - data[y * w + x - 1]) : 0) + (y ? Math.abs(v - data[(y - 1) * w + x]) : 0) > 40 ? 1 : 0;
+      rows[y * (w + 1) + x + 1] = rows[y * (w + 1) + x] + edge;
+      cols[x * (h + 1) + y + 1] = cols[x * (h + 1) + y] + edge;
+    }
+  }
+  return { scale: w / pageWidth, w, h, rows, cols };
+}
+
+/** How much a frame edge along page row `y` (from x0 to x1) would cut through ink: 0 = a clean gap. Page edges cost 0. */
+function rowCut(ink: PageInk, y: number, x0: number, x1: number) {
+  const r = Math.round(y * ink.scale), a = Math.max(0, Math.round(x0 * ink.scale)), b = Math.min(ink.w, Math.round(x1 * ink.scale));
+  if (r <= 1 || r >= ink.h - 2 || b - a < 2) return 0;
+  let sum = 0;
+  for (let k = r - 2; k <= r + 2; k += 1) sum += ink.rows[k * (ink.w + 1) + b] - ink.rows[k * (ink.w + 1) + a];
+  return sum / ((b - a) * 5);
+}
+function colCut(ink: PageInk, x: number, y0: number, y1: number) {
+  const c = Math.round(x * ink.scale), a = Math.max(0, Math.round(y0 * ink.scale)), b = Math.min(ink.h, Math.round(y1 * ink.scale));
+  if (c <= 1 || c >= ink.w - 2 || b - a < 2) return 0;
+  let sum = 0;
+  for (let k = c - 2; k <= c + 2; k += 1) sum += ink.cols[k * (ink.h + 1) + b] - ink.cols[k * (ink.h + 1) + a];
+  return sum / ((b - a) * 5);
+}
+const steps = (lo: number, hi: number, n: number) => (hi <= lo ? [(lo + hi) / 2] : Array.from({ length: n }, (_, i) => lo + ((hi - lo) * i) / (n - 1)));
 
 /** A camera view on a page, in page pixels: top-left and width (its height follows the 16:9 screen). */
 export type PageView = { x: number; y: number; w: number };
@@ -57,28 +92,40 @@ const viewHeight = (view: PageView) => (view.w * HEIGHT) / WIDTH;
 const mixView = (a: PageView, b: PageView, t: number): PageView => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, w: a.w + (b.w - a.w) * t });
 
 /** Where the camera starts and ends for a box. The page fills the whole screen; the box (plus a little padding) always sits
- * whole in the part above the caption band, widened to that part's shape so no blank margin shows. When the box is too tall
- * to fit even at the full page width, the camera pans down it instead (start: its top, end: its bottom), so nothing is cut. */
-export function pageViews(page: { width: number; height: number }, box: PageBox) {
+ * whole in the part above the caption band. Among the views that hold it (a little wider is allowed), the one whose four
+ * edges cut through the least ink is chosen, so no neighbouring line is shown cut in half. The view holds still. When the box
+ * is too tall to fit even at the full page width, the camera pans down it, starting and ending on a gap. */
+export function pageViews(page: { width: number; height: number; ink?: PageInk }, box: PageBox) {
   const ratio = WIDTH / SAFE_HEIGHT;
   const pad = page.width * BOX_PAD;
   const x0 = clamp(box[0] * page.width - pad, 0, page.width), x1 = clamp(box[2] * page.width + pad, 0, page.width);
   const y0 = clamp(box[1] * page.height - pad, 0, page.height), y1 = clamp(box[3] * page.height + pad, 0, page.height);
   const boxW = x1 - x0, boxH = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-  // `w` is the view width; the safe part shows w / ratio of page height.
-  const place = (w: number, centerY: number): PageView => {
-    const safe = w / ratio;
-    return { x: clamp(cx - w / 2, 0, Math.max(0, page.width - w)), y: clamp(centerY - safe / 2, 0, Math.max(0, page.height - safe)), w };
-  };
+  const ink = page.ink;
   const fit = Math.max(boxW, boxH * ratio);
   if (fit <= page.width) {
-    const end = place(fit, cy);
-    // The drift: start a little wider (when the page has room) and close in on the box while the line is spoken.
-    const start = place(Math.min(page.width, fit * DRIFT_WIDER), cy);
-    return { start, end, pan: false };
+    let best: PageView = { x: clamp(cx - fit / 2, 0, page.width - fit), y: clamp(cy - fit / ratio / 2, 0, Math.max(0, page.height - fit / ratio)), w: fit };
+    if (ink) {
+      let bestCost = Infinity;
+      for (let k = 0; k <= 8; k += 1) {
+        const w = Math.min(page.width, fit * (1 + 0.05 * k)), safe = w / ratio;
+        for (const x of steps(Math.max(0, x1 - w), Math.min(x0, page.width - w), 9)) {
+          for (const y of steps(Math.max(0, y1 - safe), Math.min(y0, Math.max(0, page.height - safe)), 17)) {
+            const cut = rowCut(ink, y, x, x + w) + rowCut(ink, y + safe, x, x + w) + colCut(ink, x, y, y + safe) + colCut(ink, x + w, y, y + safe);
+            const cost = cut + 0.01 * k + 0.002 * (Math.abs(x + w / 2 - cx) + Math.abs(y + safe / 2 - cy)) / safe;
+            if (cost < bestCost) { bestCost = cost; best = { x, y, w }; }
+          }
+        }
+        if (w >= page.width) break;
+      }
+    }
+    return { start: best, end: best, pan: false };
   }
   const w = page.width, safe = w / ratio;
-  return { start: { x: 0, y: y0, w }, end: { x: 0, y: Math.max(y0, y1 - safe), w }, pan: true };
+  const pick = (lo: number, hi: number, edge: (y: number) => number) => { let bestY = (lo + hi) / 2, bestCost = Infinity; for (const y of steps(lo, hi, 25)) { const c = ink ? edge(y) : 0; if (c < bestCost) { bestCost = c; bestY = y; } } return bestY; };
+  const top = pick(Math.max(0, y0 - safe * 0.12), y0, (y) => (ink ? rowCut(ink, y, 0, w) : 0));
+  const bottom = pick(y1, Math.min(page.height, y1 + safe * 0.12), (y) => (ink ? rowCut(ink, y, 0, w) : 0));
+  return { start: { x: 0, y: top, w }, end: { x: 0, y: Math.max(top, bottom - safe), w }, pan: true };
 }
 
 /** The box (plus padding) on screen for a view, for the spotlight. */
@@ -164,7 +211,7 @@ export function keyPointRuns(text: string) {
 /** The bottom band: a KEY POINT (મુખ્ય મુદ્દો) label and the row's point, its *starred* words highlighted. */
 async function captionSvg(caption: string, opacity: number, sweep = 1) {
   const text = caption.trim();
-  const band = `<rect x="0" y="${HEIGHT - CAPTION_BAND}" width="${WIDTH}" height="${CAPTION_BAND}" fill="#0b1020" fill-opacity="0.88"/>`;
+  const band = `<rect x="0" y="${HEIGHT - CAPTION_BAND}" width="${WIDTH}" height="${CAPTION_BAND}" fill="#0b1020" fill-opacity="0.95"/>`;
   if (!text) return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${band}</svg>`);
   const size = text.replaceAll("*", "").length > 48 ? 46 : 54;
   const pill = `<rect x="80" y="${HEIGHT - CAPTION_BAND + 22}" width="170" height="38" rx="19" fill="#ffd166"/><text x="165" y="${HEIGHT - CAPTION_BAND + 48}" text-anchor="middle" font-family="${FONT}" font-size="22" font-weight="800" letter-spacing="${GUJARATI.test(text) ? 0 : 2}" fill="#0b1020">${label(text, "KEY POINT", "મુખ્ય મુદ્દો")}</text>`;
