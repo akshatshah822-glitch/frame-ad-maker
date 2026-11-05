@@ -1,7 +1,7 @@
 // Optional visual boards for the exam-question (pedagogy) path only.
 // A row with no `visual` column, or `visual` = "text", keeps the original text board unchanged.
 
-export const pedagogyVisualKinds = ["text", "flowchart", "cards", "bar", "line", "waterfall", "counter", "logo", "picture", "page", "keypoints", "chapter"] as const;
+export const pedagogyVisualKinds = ["text", "flowchart", "cards", "bar", "line", "waterfall", "counter", "logo", "picture", "page", "keypoints", "chapter", "clip", "poster", "kinetic"] as const;
 export type PedagogyVisualKind = typeof pedagogyVisualKinds[number];
 
 export type PedagogyNumber = { prefix: string; value: number; suffix: string; decimals: number };
@@ -21,7 +21,13 @@ export type PedagogyVisual =
   /** A recap board in the flipbook look: a title and 2 to 7 points, *starred* words highlighted. */
   | { kind: "keypoints"; title: string; points: string[] }
   /** A chapter title card in the flipbook look: "2/6 = title = page.jpg" (the page, optional, is the blurred background). */
-  | { kind: "chapter"; number: number; total: number; title: string; file: string };
+  | { kind: "chapter"; number: number; total: number; title: string; file: string }
+  /** Portrait promo (Nov 5 2026): a real video clip, "file.mp4 = start-end = caption" (seconds in the file; caption optional). */
+  | { kind: "clip"; file: string; start: number; end: number; caption: string }
+  /** Portrait promo: part of a poster image, "file.jpg = x0, y0, x1, y1 = caption" (box as fractions), punched in and moving. */
+  | { kind: "poster"; file: string; box: [number, number, number, number]; caption: string }
+  /** Portrait promo: animated text, "Title = line | line | …" (1 to 6 lines); a line "a > b" is a pill (a) and a label (b). */
+  | { kind: "kinetic"; title: string; lines: string[] };
 
 export class PedagogyVisualParseError extends Error {
   constructor(message: string) {
@@ -135,6 +141,29 @@ export function parsePedagogyVisual(kindValue: unknown, dataValue: unknown): Ped
     if (file && !/^[\w.-]+\.(?:jpe?g|png|webp)$/i.test(file)) fail(`chapter page ${JSON.stringify(file)} must be an image file name like page06.jpg.`);
     return { kind, number, total, title, file };
   }
+  if (kind === "clip") {
+    const [file, span = "", caption = "", ...extra] = data.split("=").map((part) => part.trim());
+    if (extra.length || !/^[\w.-]+\.(?:mp4|mov|m4v|webm)$/i.test(file)) fail(`clip must be "file.mp4 = start-end = caption" (got ${JSON.stringify(data)}).`);
+    const match = /^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/.exec(span);
+    if (!match) fail(`clip span ${JSON.stringify(span)} must be seconds in the file, like 3.5-7.`);
+    const start = Number(match![1]), end = Number(match![2]);
+    if (end - start < 0.3 || end - start > 30) fail(`clip span ${JSON.stringify(span)} must be 0.3 to 30 seconds long.`);
+    return { kind, file, start, end, caption };
+  }
+  if (kind === "poster") {
+    const [file, boxText = "", caption = "", ...extra] = data.split("=").map((part) => part.trim());
+    if (extra.length || !/^[\w.-]+\.(?:jpe?g|png|webp)$/i.test(file)) fail(`poster must be "file.jpg = x0, y0, x1, y1 = caption" (got ${JSON.stringify(data)}).`);
+    const parts = boxText.split(",").map((part) => Number(part.trim()));
+    if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value) || value < 0 || value > 1) || parts[2] - parts[0] < 0.05 || parts[3] - parts[1] < 0.02) fail(`poster box ${JSON.stringify(boxText)} must be four numbers from 0 to 1: x0, y0, x1, y1.`);
+    return { kind, file, box: parts as [number, number, number, number], caption };
+  }
+  if (kind === "kinetic") {
+    const [title, list = "", ...extra] = data.split("=").map((part) => part.trim());
+    if (extra.length || !title) fail(`kinetic must be "Title = line | line | …" (got ${JSON.stringify(data)}).`);
+    const lines = list ? items(list, /\|/) : [];
+    count("kinetic", [title, ...lines], 1, 7);
+    return { kind, title, lines };
+  }
   const names = items(data, /,/).map((name) => name.toLowerCase());
   count("logo", names, 1, 8);
   const invalid = names.find((name) => !/^[a-z0-9][a-z0-9-]*$/.test(name));
@@ -152,6 +181,8 @@ export function pedagogyVisualLabels(visual: PedagogyVisual): string[] {
   if (visual.kind === "picture" || visual.kind === "page") return [visual.caption];
   if (visual.kind === "keypoints") return [visual.title, ...visual.points];
   if (visual.kind === "chapter") return [visual.title];
+  if (visual.kind === "clip" || visual.kind === "poster") return [visual.caption];
+  if (visual.kind === "kinetic") return [visual.title, ...visual.lines];
   return [];
 }
 

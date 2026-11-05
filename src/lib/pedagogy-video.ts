@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { buildAdjustedPedagogyTimeline, parsePedagogyArcs, PedagogyBriefValidationError, pedagogyWarnings, type PedagogyRow } from "@/lib/pedagogy-brief";
+import { buildAdjustedPedagogyTimeline, parsePedagogyArcs, parsePedagogyMusic, PedagogyBriefValidationError, pedagogyWarnings, type PedagogyRow } from "@/lib/pedagogy-brief";
 import { createPedagogyNarrationTracks } from "@/lib/pedagogy-narration-duration";
 import { createPedagogySlide, pedagogySlideFontSize, type PedagogySlideState } from "@/lib/pedagogy-slide";
 import { createPassageSlide, passageSlideFontSize } from "@/lib/pedagogy-passage-slide";
@@ -13,7 +13,8 @@ import { createDiagramSlide, diagramSlideFontSize, DIAGRAM_ANIMATION_FRAMES, DIA
 import { probeFinalVideo } from "@/lib/video-qa";
 import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } from "@/lib/pedagogy-transition";
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
-import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
+import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos, pedagogyLogoDirectory } from "@/lib/pedagogy-look-slide";
+import { createClipFrames, createKineticFrames, createPosterFrames } from "@/lib/pedagogy-promo";
 import { createChapterFrames, createKeyPointsFrames, createPageFrames, loadPagePictures, type PageState } from "@/lib/pedagogy-page";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, solutionDiagramFiles } from "@/lib/pedagogy-solution";
 import { loadPedagogyImage } from "@/lib/pedagogy-infographic";
@@ -348,6 +349,19 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
             concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
             lastFrame = framePath;
           }
+        } else if (visual.kind === "clip" || visual.kind === "poster" || visual.kind === "kinetic") {
+          // Portrait promo scenes: frames are written as they are made (a clip can be hundreds of frames).
+          let frame = 0;
+          const emit = async (png: Buffer, duration: number) => {
+            const framePath = `${framePrefix}-m${String(frame).padStart(4, "0")}.png`;
+            frame += 1;
+            await writeFile(framePath, png);
+            concatLines.push(`file '${framePath}'`, `duration ${duration.toFixed(6)}`);
+            lastFrame = framePath;
+          };
+          if (visual.kind === "clip") await createClipFrames(visual, row.allocatedDuration, emit);
+          else if (visual.kind === "poster") await createPosterFrames(visual, row.allocatedDuration, emit);
+          else await createKineticFrames(visual, row.allocatedDuration, emit);
         } else if (visual.kind === "chapter") {
           const frames = await createChapterFrames(visual.file ? pages.get(visual.file) : null, visual, row.allocatedDuration, rowProgress(row));
           for (const [frame, { png, duration }] of frames.entries()) {
@@ -420,11 +434,32 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     const delay = Math.round(row.adjustedGeneratedTime * 1000);
     return `[${index + 1}:a]adelay=${delay}|${delay},aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${index}]`;
   });
-  const audioInputs = rows.map((_, index) => `[a${index}]`).join("");
+  let audioInputs = rows.map((_, index) => `[a${index}]`).join("");
+  let mixCount = rows.length;
+  // Background music (Nov 5 2026): low under the narration; from the end of the first music_level = full row's narration
+  // it rises to full, and that moment is the song moment named in the music column. Logged either way.
+  const musicSetting = rows[0].music ? parsePedagogyMusic(rows[0].music) : null;
+  if (musicSetting) {
+    const musicPath = join(pedagogyLogoDirectory(), musicSetting.file);
+    const found = await stat(musicPath).then(() => true).catch(() => false);
+    const fullIndex = timeline.rows.findIndex((row) => row.musicFull);
+    const fullAt = fullIndex >= 0 ? timeline.rows[fullIndex].adjustedGeneratedTime + narrationDurations[fullIndex] + 0.1 : totalDuration + 1;
+    const songStart = musicSetting.punchSeconds - (fullIndex >= 0 ? fullAt : 0);
+    console.info("Pedagogy music", { path: found ? "music-bed" : "missing-music-file", file: musicSetting.file, fullAt: fullIndex >= 0 ? fullAt.toFixed(2) : "never", songStart: songStart.toFixed(2) });
+    if (found) {
+      if (songStart >= 0) inputs.push("-ss", songStart.toFixed(3));
+      inputs.push("-i", musicPath);
+      const delay = songStart < 0 ? Math.round(-songStart * 1000) : 0;
+      const low = 0.16, fadeOut = Math.max(0, totalDuration - 1.8);
+      audioFilters.push(`[${rows.length + 1}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${delay}|${delay},volume='${low}+${(1 - low).toFixed(2)}*min(max((t-${fullAt.toFixed(3)})/0.6\,0)\,1)':eval=frame,afade=t=in:st=0:d=0.8,afade=t=out:st=${fadeOut.toFixed(3)}:d=1.8[music]`);
+      audioInputs += "[music]";
+      mixCount += 1;
+    }
+  }
   onProgress?.({ phase: "assembling-mp4" });
   await runFfmpeg([
     ...inputs,
-    "-filter_complex", `[0:v]fps=24,format=yuv420p,setsar=1[outv];${audioFilters.join(";")};${audioInputs}amix=inputs=${rows.length}:duration=longest:normalize=0,atrim=duration=${totalDuration.toFixed(6)}[outa]`,
+    "-filter_complex", `[0:v]fps=24,format=yuv420p,setsar=1[outv];${audioFilters.join(";")};${audioInputs}amix=inputs=${mixCount}:duration=longest:normalize=0,atrim=duration=${totalDuration.toFixed(6)}[outa]`,
     "-map", "[outv]", "-map", "[outa]", "-t", totalDuration.toFixed(6), "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-r", "24", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", outputPath,
   ]);
   const qa = await probeFinalVideo(outputPath, { width: portrait ? 1080 : 1920, height: portrait ? 1920 : 1080, duration: totalDuration });

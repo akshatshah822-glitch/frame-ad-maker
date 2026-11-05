@@ -56,6 +56,15 @@ export type PedagogyBriefInputRow = {
   /** Optional (Oct 30 2026), theme = board only: "yes" = this row shows the full-screen trick card (chapter + trick
    * name) while it is spoken, e.g. an opening hook. Blank = the board, as before. */
   card?: unknown;
+  /** Optional (Nov 5 2026), first row only: background music, "file.mp3 = M:SS" — the song moment that lands where the
+   * music first turns full (see music_level). The file lives in pedagogy-images. Blank or missing = no music, as before. */
+  music?: unknown;
+  /** Optional (Nov 5 2026): "full" = after this row's narration, the music plays at full volume (no voice over it).
+   * Blank = the music stays low under the narration. Needs music on the first row. */
+  musicLevel?: unknown;
+  /** Optional (Nov 5 2026): seconds (0 to 20) added after this row's narration, e.g. for the music to play alone.
+   * Blank or missing = 0, so older sheets keep their timing. */
+  hold?: unknown;
   /** Optional, theme = board only: margin notes "N | text" (N = working line the arrow points at) or "text".
    * Carry forward within a question_id. */
   trap?: unknown;
@@ -124,6 +133,12 @@ export type PedagogyRow = {
   effectiveOrientation: "landscape" | "portrait";
   /** theme = board: this row shows the trick card instead of the board. */
   showCard: boolean;
+  /** First row only: "file.mp3 = M:SS" background music ("" = none). */
+  music: string;
+  /** After this row's narration the music plays at full volume. */
+  musicFull: boolean;
+  /** Seconds added after this row's narration (0 = none). */
+  holdSeconds: number;
   effectiveTrap: string;
   effectiveTrick: string;
   effectiveRemember: string;
@@ -220,6 +235,35 @@ function parseLineNumber(value: unknown, sourceRow: number) {
   return lineNo;
 }
 
+function parseMusic(value: unknown, sourceRow: number) {
+  const text = valueAsText(value).trim();
+  if (!text) return "";
+  if (!/^[\w.-]+\.(?:mp3|m4a|wav|aac)\s*=\s*\d{1,2}:\d{2}(?:\.\d+)?$/i.test(text)) throw rowError(sourceRow, 'music must be "file.mp3 = M:SS" (the song moment where the music turns full), or blank.');
+  return text;
+}
+
+function parseMusicLevel(value: unknown, sourceRow: number) {
+  const text = valueAsText(value).trim().toLowerCase();
+  if (!text || text === "low") return false;
+  if (text === "full") return true;
+  throw rowError(sourceRow, 'music_level must be "full", "low", or blank.');
+}
+
+function parseHold(value: unknown, sourceRow: number) {
+  const text = valueAsText(value).trim();
+  if (!text) return 0;
+  const seconds = Number(text);
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > 20) throw rowError(sourceRow, "hold must be seconds from 0 to 20, or blank.");
+  return seconds;
+}
+
+/** "file.mp3 = M:SS" → the file and the song second that lands where the music first turns full. */
+export function parsePedagogyMusic(text: string) {
+  const [file, at] = text.split("=").map((part) => part.trim());
+  const [minutes, seconds] = at.split(":");
+  return { file, punchSeconds: Number(minutes) * 60 + Number(seconds) };
+}
+
 function parsePause(value: unknown, sourceRow: number): "haan" | "nahi" {
   const text = valueAsText(value).trim().toLowerCase();
   if (!text || text === "nahi") return "nahi";
@@ -312,6 +356,9 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       themeText: valueAsText(input.theme).trim().toLowerCase(),
       orientationText: valueAsText(input.orientation).trim().toLowerCase(),
       cardText: valueAsText(input.card).trim().toLowerCase(),
+      music: parseMusic(input.music, sourceRow),
+      musicFull: parseMusicLevel(input.musicLevel, sourceRow),
+      holdSeconds: parseHold(input.hold, sourceRow),
       trapText: valueAsText(input.trap).trim(),
       trickText: valueAsText(input.trick).trim(),
       rememberText: valueAsText(input.remember).trim(),
@@ -459,7 +506,12 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
       if (index > 0 && row.orientationText !== orientation) throw rowError(row.sourceRow, 'orientation is set once, on the first row, for the whole video.');
       orientation = row.orientationText;
     }
-    if (orientation === "portrait" && row.layout !== "solution") throw rowError(row.sourceRow, `orientation "portrait" draws layout = solution only for now (theme classic or board); this row is layout = ${row.layout}.`);
+    // Portrait draws layout = solution, and (Nov 5 2026) the promo visuals clip, poster and kinetic.
+    const portraitVisual = row.layout === "visual" && ["clip", "poster", "kinetic"].includes(row.visual);
+    if (orientation === "portrait" && row.layout !== "solution" && !portraitVisual) throw rowError(row.sourceRow, `orientation "portrait" draws layout = solution, or layout = visual with visual clip, poster or kinetic; this row is layout = ${row.layout}${row.layout === "visual" ? ` (visual ${row.visual})` : ""}.`);
+    if (orientation !== "portrait" && row.layout === "visual" && ["clip", "poster", "kinetic"].includes(row.visual)) throw rowError(row.sourceRow, `visual ${row.visual} is drawn in portrait only: set orientation = portrait on the first row.`);
+    if (row.music && index > 0) throw rowError(row.sourceRow, "music is set once, on the first row, for the whole video.");
+    if (row.musicFull && !rows[0].music) throw rowError(row.sourceRow, "music_level = full needs music on the first row.");
     if (row.themeText) {
       if (row.themeText !== "classic" && row.themeText !== "board") throw rowError(row.sourceRow, 'theme must be "classic", "board", or blank.');
       retainedTheme = row.themeText;
@@ -568,6 +620,8 @@ export function buildAdjustedPedagogyTimeline(rows: PedagogyRow[], narrationDura
       : originalAvailableDuration === null
         ? narrationDuration + 0.5
         : Math.max(originalAvailableDuration, narrationDuration + 0.5);
+    // hold (Nov 5 2026): extra seconds after the narration, e.g. for the music to play alone; 0 when blank.
+    const heldDuration = allocatedDuration + (row.holdSeconds ?? 0);
     const auditRow = {
       sourceRow: row.sourceRow,
       sourceTime: row.sourceTime,
@@ -577,10 +631,10 @@ export function buildAdjustedPedagogyTimeline(rows: PedagogyRow[], narrationDura
       adjustedGeneratedTimeLabel: formatPedagogyTime(adjustedGeneratedTime),
       originalAvailableDuration,
       narrationDuration,
-      allocatedDuration,
-      addedDuration: originalAvailableDuration === null ? 0 : allocatedDuration - originalAvailableDuration,
+      allocatedDuration: heldDuration,
+      addedDuration: originalAvailableDuration === null ? 0 : heldDuration - originalAvailableDuration,
     } satisfies PedagogyTimingAuditRow;
-    adjustedGeneratedTime += allocatedDuration;
+    adjustedGeneratedTime += heldDuration;
     return auditRow;
   });
   return {
