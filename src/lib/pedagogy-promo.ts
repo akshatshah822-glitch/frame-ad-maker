@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import sharp, { type OverlayOptions } from "sharp";
 import { pedagogyLogoDirectory } from "@/lib/pedagogy-look-slide";
-import { keyPointRuns, textWidth } from "@/lib/pedagogy-page";
+import { keyPointRuns } from "@/lib/pedagogy-page";
 
 const run = promisify(execFile);
 const W = 1080;
@@ -49,6 +49,18 @@ function festive(t: number, cy = 820) {
   return `<defs><radialGradient id="r" cx="50%" cy="${((cy / H) * 100).toFixed(0)}%" r="75%"><stop offset="0" stop-color="#a3182a"/><stop offset="1" stop-color="#36050b"/></radialGradient></defs><rect width="${W}" height="${H}" fill="url(#r)"/>${Array.from({ length: 12 }, (_, i) => ray(i)).join("")}${sparks(t, 30, 3)}`;
 }
 
+const measured = new Map<string, number>();
+/** Drawn width of text in this file's own font (rendered between two bars and trimmed), so spaces at the ends count. */
+async function textWidth(text: string, size: number, weight: number) {
+  const key = `${size}|${weight}|${text}`;
+  const known = measured.get(key);
+  if (known !== undefined) return known;
+  const draw = async (value: string) => (await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(value.length * size * 1.2 + 200)}" height="${size * 2}"><rect width="100%" height="100%" fill="#fff"/><text x="10" y="${size * 1.4}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" xml:space="preserve">${esc(value)}</text></svg>`)).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true })).info.width;
+  const width = text ? Math.max(0, (await draw(`|${text}|`)) - (await draw("||"))) : 0;
+  measured.set(key, width);
+  return width;
+}
+
 /** Text that fits a width: the measured width at `size`, scaled down when wider than `max`. */
 async function fit(text: string, size: number, weight: number, max: number) {
   const width = await textWidth(text, size, weight);
@@ -59,21 +71,23 @@ async function fit(text: string, size: number, weight: number, max: number) {
 async function captionSvg(caption: string, t: number) {
   const plain = caption.replaceAll("*", "").trim();
   if (!plain) return "";
-  const { size } = await fit(plain.replaceAll(" ", "\u00a0"), 66, 800, W - 180);
-  // Spaces become no-break spaces, so a space at the edge of a highlighted run is both measured and drawn.
-  const runs = keyPointRuns(caption.replaceAll(" ", "\u00a0"));
-  const widths = await Promise.all(runs.map((run) => textWidth(run.text, size, 800)));
-  const total = widths.reduce((a, b) => a + b, 0);
+  const { size } = await fit(plain, 66, 800, W - 180);
+  const runs = keyPointRuns(caption);
   const show = easeOut(t / 0.35), sweep = clamp((t - 0.3) / 0.5);
+  const total = await textWidth(plain, size, 800);
   const cardW = total + 100, cardH = size * 1.9, cardX = (W - cardW) / 2, cardY = H - 330 + (1 - show) * 120;
-  let x = (W - total) / 2;
-  const baseline = cardY + cardH / 2 + size * 0.36;
-  let marks = "", spans = "";
-  for (const [i, run] of runs.entries()) {
-    if (run.mark) marks += `<rect x="${(x - 8).toFixed(1)}" y="${(baseline - size * 0.9).toFixed(1)}" width="${((widths[i] + 16) * sweep).toFixed(1)}" height="${(size * 1.15).toFixed(1)}" rx="10" fill="${GOLD}"/>`;
-    spans += `<text x="${x.toFixed(1)}" y="${baseline.toFixed(1)}" font-family="${FONT}" font-size="${size}" font-weight="800" fill="${run.mark ? INK : MAROON}" xml:space="preserve">${esc(run.text)}</text>`;
-    x += widths[i];
+  const x0 = (W - total) / 2, baseline = cardY + cardH / 2 + size * 0.36;
+  // One text line (spaces drawn by the font itself); each starred run's marker starts at the measured width of what precedes it.
+  let marks = "", spans = "", before = "";
+  for (const run of runs) {
+    if (run.mark) {
+      const left = x0 + (await textWidth(before, size, 800)), width = await textWidth(run.text, size, 800);
+      marks += `<rect x="${(left - 8).toFixed(1)}" y="${(baseline - size * 0.9).toFixed(1)}" width="${((width + 16) * sweep).toFixed(1)}" height="${(size * 1.15).toFixed(1)}" rx="10" fill="${GOLD}"/>`;
+    }
+    spans += `<tspan fill="${run.mark ? INK : MAROON}">${esc(run.text)}</tspan>`;
+    before += run.text;
   }
+  spans = `<text x="${x0.toFixed(1)}" y="${baseline.toFixed(1)}" font-family="${FONT}" font-size="${size}" font-weight="800" xml:space="preserve">${spans}</text>`;
   return `<g opacity="${show.toFixed(3)}"><rect x="${(cardX + 6).toFixed(1)}" y="${(cardY + 12).toFixed(1)}" width="${cardW.toFixed(1)}" height="${cardH.toFixed(1)}" rx="${(cardH / 2).toFixed(1)}" fill="#000" fill-opacity="0.35"/><rect x="${cardX.toFixed(1)}" y="${cardY.toFixed(1)}" width="${cardW.toFixed(1)}" height="${cardH.toFixed(1)}" rx="${(cardH / 2).toFixed(1)}" fill="${CREAM}" stroke="${GOLD}" stroke-width="5"/>${marks}${spans}</g>`;
 }
 
