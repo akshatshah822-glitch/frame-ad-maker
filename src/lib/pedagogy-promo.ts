@@ -1,6 +1,6 @@
 // Portrait promo scenes (Nov 5 2026), exam-question (pedagogy) path only: visual = clip, poster or kinetic.
 // Everything moves: clips play (cut in with a short flash), poster parts punch in and keep pushing in with a shine sweep
-// over a drifting, blurred background, and kinetic text drops and slides in over turning light rays and rising sparks.
+// over the moving festive background, and kinetic text drops and slides in over turning light rays and rising sparks.
 // Frames are 1080 × 1920 at 24 fps and are handed to `emit` one at a time, so long clips never sit in memory.
 import { execFile } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
@@ -42,6 +42,13 @@ function sparks(t: number, count = 26, seed = 7) {
   return s;
 }
 
+/** The festive moving background: deep maroon, slowly turning gold light rays, rising sparks. */
+function festive(t: number, cy = 820) {
+  const angle = t * 9;
+  const ray = (i: number) => { const a = ((i * 30 + angle) * Math.PI) / 180, b = ((i * 30 + 12 + angle) * Math.PI) / 180; return `<polygon points="540,${cy} ${540 + 1700 * Math.cos(a)},${cy + 1700 * Math.sin(a)} ${540 + 1700 * Math.cos(b)},${cy + 1700 * Math.sin(b)}" fill="${GOLD}" fill-opacity="0.07"/>`; };
+  return `<defs><radialGradient id="r" cx="50%" cy="${((cy / H) * 100).toFixed(0)}%" r="75%"><stop offset="0" stop-color="#a3182a"/><stop offset="1" stop-color="#36050b"/></radialGradient></defs><rect width="${W}" height="${H}" fill="url(#r)"/>${Array.from({ length: 12 }, (_, i) => ray(i)).join("")}${sparks(t, 30, 3)}`;
+}
+
 /** Text that fits a width: the measured width at `size`, scaled down when wider than `max`. */
 async function fit(text: string, size: number, weight: number, max: number) {
   const width = await textWidth(text, size, weight);
@@ -52,8 +59,9 @@ async function fit(text: string, size: number, weight: number, max: number) {
 async function captionSvg(caption: string, t: number) {
   const plain = caption.replaceAll("*", "").trim();
   if (!plain) return "";
-  const { size } = await fit(plain, 60, 800, W - 200);
-  const runs = keyPointRuns(caption);
+  const { size } = await fit(plain.replaceAll(" ", "\u00a0"), 66, 800, W - 180);
+  // Spaces become no-break spaces, so a space at the edge of a highlighted run is both measured and drawn.
+  const runs = keyPointRuns(caption.replaceAll(" ", "\u00a0"));
   const widths = await Promise.all(runs.map((run) => textWidth(run.text, size, 800)));
   const total = widths.reduce((a, b) => a + b, 0);
   const show = easeOut(t / 0.35), sweep = clamp((t - 0.3) / 0.5);
@@ -102,7 +110,7 @@ export async function createClipFrames(visual: { file: string; start: number; en
   }
 }
 
-type Poster = { full: Buffer; width: number; height: number; backdrop: Buffer };
+type Poster = { full: Buffer; width: number; height: number };
 const posters = new Map<string, Poster>();
 async function loadPoster(file: string) {
   const known = posters.get(file);
@@ -110,9 +118,7 @@ async function loadPoster(file: string) {
   const data = await readFile(join(pedagogyLogoDirectory(), file));
   const full = await sharp(data).rotate().flatten({ background: "#ffffff" }).png().toBuffer();
   const { width = 1, height = 1 } = await sharp(full).metadata();
-  // A blurred, darkened backdrop 20% larger than the frame, so it can drift.
-  const backdrop = await sharp(full).resize(Math.round(W * 1.2), Math.round(H * 1.2), { fit: "cover" }).blur(40).modulate({ brightness: 0.45, saturation: 1.1 }).png().toBuffer();
-  const poster = { full, width, height, backdrop };
+  const poster = { full, width, height };
   posters.set(file, poster);
   return poster;
 }
@@ -124,14 +130,11 @@ export async function createPosterFrames(visual: { file: string; box: [number, n
   const [x0, y0, x1, y1] = visual.box;
   const region = { left: Math.round(x0 * poster.width), top: Math.round(y0 * poster.height), width: Math.max(2, Math.round((x1 - x0) * poster.width)), height: Math.max(2, Math.round((y1 - y0) * poster.height)) };
   const crop = await sharp(poster.full).extract(region).png().toBuffer();
-  const fitScale = Math.min(980 / region.width, 1250 / region.height);
+  const fitScale = Math.min(1010 / region.width, 1150 / region.height);
   const baseW = region.width * fitScale, baseH = region.height * fitScale;
   const frames = Math.max(1, Math.round(allocatedDuration * FPS));
   for (let index = 0; index < frames; index += 1) {
     const t = index / FPS, u = frames === 1 ? 1 : index / (frames - 1);
-    // Backdrop drifts (slow pan and zoom inside the larger blurred copy).
-    const bx = Math.round((W * 0.2) * (0.5 + 0.5 * Math.sin(u * Math.PI - Math.PI / 2)) * 0.8), by = Math.round(H * 0.1 * u);
-    const back = await sharp(poster.backdrop).extract({ left: Math.min(bx, Math.round(W * 0.2) - 1), top: Math.min(by, Math.round(H * 0.2) - 1), width: W, height: H }).png().toBuffer();
     const pop = backOut(t / 0.45), push = 1 + 0.07 * easeOut(u);
     const scale = (0.55 + 0.45 * pop) * push;
     const w = Math.max(4, Math.round(baseW * scale)), h = Math.max(4, Math.round(baseH * scale));
@@ -143,34 +146,35 @@ export async function createPosterFrames(visual: { file: string; box: [number, n
     const card = await sharp(crop).resize(w, h, { fit: "fill" }).composite([...(shine ? [{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">${shine}</svg>`), left: 0, top: 0 }] : []), { input: mask, blend: "dest-in" as const }]).png().toBuffer();
     const glow = `<rect x="${left - 10}" y="${top - 10}" width="${w + 20}" height="${h + 20}" rx="34" fill="none" stroke="${GOLD}" stroke-width="6" stroke-opacity="${(0.9 * clamp(pop)).toFixed(2)}"/>`;
     const shadow = `<rect x="${left + 10}" y="${top + 26}" width="${w}" height="${h}" rx="26" fill="#000" fill-opacity="${(0.5 * clamp(pop)).toFixed(2)}" filter="url(#b)"/><defs><filter id="b" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="22"/></filter></defs>`;
-    const under = svg(`${sparks(t)}${shadow}`);
+    const under = svg(`${festive(t)}${shadow}`);
     const over = svg(`${glow}${await captionSvg(visual.caption, t)}`);
-    const png = await sharp(back).composite([{ input: under, left: 0, top: 0 }, { input: card, left: clampInt(left, -w + 1, W - 1), top: clampInt(top, -h + 1, H - 1) }, { input: over, left: 0, top: 0 }]).png().toBuffer();
+    // The card may grow past the frame edge while punching in: keep only its visible part.
+    const vx = Math.max(0, -left), vy = Math.max(0, -top), vw = Math.min(w - vx, W - Math.max(0, left)), vh = Math.min(h - vy, H - Math.max(0, top));
+    const visible = vw < w || vh < h ? await sharp(card).extract({ left: vx, top: vy, width: Math.max(1, vw), height: Math.max(1, vh) }).png().toBuffer() : card;
+    const png = await sharp(under).composite([{ input: visible, left: Math.max(0, left), top: Math.max(0, top) }, { input: over, left: 0, top: 0 }]).png().toBuffer();
     await emit(png, 1 / FPS);
   }
 }
-const clampInt = (value: number, min: number, max: number) => Math.round(Math.min(max, Math.max(min, value)));
 
 /** Kinetic text: the title drops in with a bounce, then each line slides in from the right, one after another, over a maroon
  * background with slowly turning light rays and rising sparks. "a > b" lines are a gold pill (a) and a label (b). */
 export async function createKineticFrames(visual: { title: string; lines: string[] }, allocatedDuration: number, emit: PromoEmit) {
   const title = visual.title.replaceAll("*", "");
-  const titleFit = await fit(title, visual.lines.length ? 104 : 132, 800, W - 140);
+  const titleFit = await fit(title, visual.lines.length ? 112 : 140, 800, W - 120);
   const lines = await Promise.all(visual.lines.map(async (line) => {
     const [pill, label] = line.includes(">") ? line.split(">").map((part) => part.trim()) : ["", line.trim()];
-    const pillFit = pill ? await fit(pill, 50, 800, 360) : { size: 0, width: 0 };
-    const labelFit = await fit(label, 56, 800, pill ? W - 220 - pillFit.width - 90 : W - 220);
+    const pillFit = pill ? await fit(pill, 56, 800, 380) : { size: 0, width: 0 };
+    const labelFit = await fit(label, 64, 800, pill ? W - 190 - pillFit.width - 90 : W - 190);
     return { pill, label, pillFit, labelFit };
   }));
-  const step = Math.min(170, 900 / Math.max(1, lines.length));
-  const titleY = lines.length ? 560 - Math.min(0, 0) : 960;
+  const step = Math.min(176, 1000 / Math.max(1, lines.length));
+  // The title and the lines are centred as one block around the middle of the frame.
+  const titleY = lines.length ? Math.round(900 - (150 + (lines.length - 1) * step) / 2) : 960;
   const frames = Math.max(1, Math.round(allocatedDuration * FPS));
   for (let index = 0; index < frames; index += 1) {
     const t = index / FPS;
-    const angle = t * 9;
-    const rays = Array.from({ length: 12 }, (_, i) => `<polygon points="540,820 ${540 + 1600 * Math.cos(((i * 30 + angle) * Math.PI) / 180)},${820 + 1600 * Math.sin(((i * 30 + angle) * Math.PI) / 180)} ${540 + 1600 * Math.cos(((i * 30 + 12 + angle) * Math.PI) / 180)},${820 + 1600 * Math.sin(((i * 30 + 12 + angle) * Math.PI) / 180)}" fill="${GOLD}" fill-opacity="0.06"/>`).join("");
     const drop = backOut(t / 0.5);
-    let body = `<defs><radialGradient id="r" cx="50%" cy="42%" r="75%"><stop offset="0" stop-color="#a3182a"/><stop offset="1" stop-color="#3a060c"/></radialGradient></defs><rect width="${W}" height="${H}" fill="url(#r)"/>${rays}${sparks(t, 30, 3)}`;
+    let body = festive(t, 900);
     body += `<g transform="translate(540 ${(titleY - (1 - drop) * 260).toFixed(1)}) scale(${(0.7 + 0.3 * drop).toFixed(3)})" opacity="${clamp(t / 0.25).toFixed(3)}"><text x="0" y="0" text-anchor="middle" font-family="${FONT}" font-size="${titleFit.size}" font-weight="800" fill="${GOLD}" stroke="${INK}" stroke-width="3" paint-order="stroke">${esc(title)}</text></g>`;
     if (lines.length) body += `<rect x="${540 - 140 * easeOut((t - 0.3) / 0.4)}" y="${titleY + 50}" width="${280 * easeOut((t - 0.3) / 0.4)}" height="8" rx="4" fill="${GOLD}"/>`;
     for (const [i, line] of lines.entries()) {
@@ -181,10 +185,10 @@ export async function createKineticFrames(visual: { title: string; lines: string
       const y = titleY + 150 + i * step, dx = (1 - k) * 700;
       const rowW = (line.pill ? line.pillFit.width + 70 + 30 : 0) + line.labelFit.width + 80;
       const x = (W - rowW) / 2 + dx;
-      let g = `<rect x="${x}" y="${y - 70}" width="${rowW}" height="112" rx="56" fill="${CREAM}" fill-opacity="0.97" stroke="${GOLD}" stroke-width="5"/>`;
+      let g = `<rect x="${x}" y="${y - 74}" width="${rowW}" height="120" rx="60" fill="${CREAM}" fill-opacity="0.97" stroke="${GOLD}" stroke-width="5"/>`;
       let cx = x + 40;
       if (line.pill) {
-        g += `<rect x="${cx - 16}" y="${y - 56}" width="${line.pillFit.width + 60}" height="84" rx="42" fill="${MAROON}"/><text x="${cx + 14}" y="${y + 3}" font-family="${FONT}" font-size="${line.pillFit.size}" font-weight="800" fill="#fff">${esc(line.pill)}</text>`;
+        g += `<rect x="${cx - 16}" y="${y - 60}" width="${line.pillFit.width + 60}" height="92" rx="46" fill="${MAROON}"/><text x="${cx + 14}" y="${y + 3}" font-family="${FONT}" font-size="${line.pillFit.size}" font-weight="800" fill="#fff">${esc(line.pill)}</text>`;
         cx += line.pillFit.width + 70 + 20;
       }
       g += `<text x="${cx}" y="${y + 6}" font-family="${FONT}" font-size="${line.labelFit.size}" font-weight="800" fill="${MAROON}">${esc(line.label)}</text>`;
