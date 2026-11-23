@@ -38,12 +38,43 @@ export function buildPedagogySpeechRequest(script: string) {
  */
 export type PedagogyVoice =
   | { provider: "openai"; label: "default-teacher" }
-  | { provider: "elevenlabs"; label: "educator"; voiceId: string; consentRef: string };
+  | { provider: "elevenlabs"; label: "educator"; voiceId: string; consentRef: string }
+  | { provider: "sarvam"; label: "sarvam-clone"; voiceId: string };
 
 const EDUCATOR_VOICE_ENV = ["ELEVENLABS_API_KEY", "ELEVENLABS_EDUCATOR_VOICE_ID", "PEDAGOGY_EDUCATOR_CONSENT_REF"] as const;
 const loggedVoiceDecisions = new Set<string>();
 
+function logVoiceDecisionOnce(key: string, log: () => void) {
+  if (loggedVoiceDecisions.has(key)) return;
+  loggedVoiceDecisions.add(key);
+  log();
+}
+
+/**
+ * Optional Sarvam cloned voice (Bulbul voice cloning, POST /voices/clone with a saved voice_id).
+ * Off unless PEDAGOGY_SARVAM_VOICE_ID is set (a saved clone, "svc-<uuid>").
+ * Needs SARVAM_API_KEY (never logged). When on, it is used instead of PEDAGOGY_VOICE.
+ * Voice ID set but no key -> the voice PEDAGOGY_VOICE picks runs, and the log says so.
+ * Only use clones of synthetic voices or of people who gave signed consent.
+ */
+function resolveSarvamVoice(env: Record<string, string | undefined>): PedagogyVoice | null {
+  const voiceId = env.PEDAGOGY_SARVAM_VOICE_ID?.trim();
+  if (!voiceId) return null;
+  if (!/^svc-[0-9a-f-]{36}$/i.test(voiceId)) {
+    logVoiceDecisionOnce("sarvam-bad-id", () => console.warn("Pedagogy voice", { path: "sarvam-skipped", reason: "PEDAGOGY_SARVAM_VOICE_ID is not a saved Sarvam voice id (svc-<uuid>)" }));
+    return null;
+  }
+  if (!env.SARVAM_API_KEY?.trim()) {
+    logVoiceDecisionOnce("sarvam-no-key", () => console.warn("Pedagogy voice", { path: "sarvam-skipped", reason: "Sarvam voice requested but not fully configured", missing: ["SARVAM_API_KEY"] }));
+    return null;
+  }
+  logVoiceDecisionOnce(`sarvam:${voiceId}`, () => console.info("Pedagogy voice", { path: "sarvam-clone", voiceId }));
+  return { provider: "sarvam", label: "sarvam-clone", voiceId };
+}
+
 export function resolvePedagogyVoice(env: Record<string, string | undefined> = process.env): PedagogyVoice {
+  const sarvam = resolveSarvamVoice(env);
+  if (sarvam) return sarvam;
   if (env.PEDAGOGY_VOICE?.trim().toLowerCase() !== "educator") return { provider: "openai", label: "default-teacher" };
   const missing = EDUCATOR_VOICE_ENV.filter((name) => !env[name]?.trim());
   if (missing.length) {
@@ -91,7 +122,64 @@ export function buildEducatorSpeechRequest(script: string, voiceId: string) {
  * The model follows the line's script, so Hindi lines keep their old cache keys.
  */
 export function pedagogyVoiceCacheIdentity(voice: PedagogyVoice = resolvePedagogyVoice(), script = "") {
-  return voice.provider === "openai" ? null : { provider: voice.provider, voiceId: voice.voiceId, model: educatorVoiceModel(script), speed: EDUCATOR_VOICE_SPEED };
+  if (voice.provider === "openai") return null;
+  if (voice.provider === "sarvam") return { provider: voice.provider, voiceId: voice.voiceId, languageCode: sarvamLanguageCode(script), pace: SARVAM_VOICE_PACE, codec: "mp3-44100" };
+  return { provider: voice.provider, voiceId: voice.voiceId, model: educatorVoiceModel(script), speed: EDUCATOR_VOICE_SPEED };
+}
+
+/** Sarvam clone pace (0.5 to 2.0; 1 = natural). The tested Krupa sample sounded right at 1.0. */
+export const SARVAM_VOICE_PACE = 1;
+/** Sarvam rejects text over 1000 characters per request. */
+export const SARVAM_MAX_CHARACTERS = 1000;
+const DEVANAGARI_SCRIPT = /[ऀ-ॿ]/;
+
+/** Language from the line itself: Gujarati letters -> gu-IN, Devanagari -> hi-IN, else en-IN. English words inside stay English. */
+export function sarvamLanguageCode(script: string) {
+  if (GUJARATI_SCRIPT.test(script)) return "gu-IN";
+  if (DEVANAGARI_SCRIPT.test(script)) return "hi-IN";
+  return "en-IN";
+}
+
+export function buildSarvamSpeechRequest(script: string, voiceId: string) {
+  const text = script.trim();
+  if (!text) throw new Error("Pedagogy narration is blank.");
+  if (text.length > SARVAM_MAX_CHARACTERS) throw new Error(`Sarvam voice takes at most ${SARVAM_MAX_CHARACTERS} characters per line; this line has ${text.length}.`);
+  return {
+    url: "https://api.sarvam.ai/voices/clone",
+    fields: {
+      text,
+      voice_id: voiceId,
+      language_code: sarvamLanguageCode(text),
+      pace: String(SARVAM_VOICE_PACE),
+      output_audio_codec: "mp3",
+      speech_sample_rate: "44100",
+    },
+  };
+}
+
+/** Sarvam's own error code or message, never the key. */
+async function sarvamErrorCode(response: Response) {
+  try {
+    const body = (await response.json()) as { error?: { code?: unknown; message?: unknown } };
+    const code = body.error?.code ?? body.error?.message;
+    return typeof code === "string" ? ` (${code.replace(/[^\w .,:-]/g, "").slice(0, 80)})` : "";
+  } catch {
+    return "";
+  }
+}
+
+export async function generateSarvamNarrationTrack(script: string, voiceId: string, fetchImpl: typeof fetch = fetch) {
+  const request = buildSarvamSpeechRequest(script, voiceId);
+  const form = new FormData();
+  for (const [name, value] of Object.entries(request.fields)) form.append(name, value);
+  const response = await fetchImpl(request.url, { method: "POST", headers: { "api-subscription-key": process.env.SARVAM_API_KEY ?? "" }, body: form });
+  // No silent switch to another voice mid-video: a failed Sarvam line fails the render.
+  if (!response.ok) throw new Error(`Sarvam voice request failed with HTTP ${response.status}${await sarvamErrorCode(response)}.`);
+  const body = (await response.json()) as { audio_b64?: unknown; audio?: unknown };
+  const encoded = typeof body.audio_b64 === "string" ? body.audio_b64 : typeof body.audio === "string" ? body.audio : "";
+  const audio = new Uint8Array(Buffer.from(encoded, "base64"));
+  if (!audio.byteLength) throw new Error("Sarvam voice request returned no audio.");
+  return audio;
 }
 
 /** ElevenLabs voice types that are NOT a copy of a real person's voice. */
@@ -155,6 +243,7 @@ async function elevenLabsErrorCode(response: Response) {
 }
 
 export async function generatePedagogyNarrationTrack(script: string, voice: PedagogyVoice = resolvePedagogyVoice()) {
+  if (voice.provider === "sarvam") return generateSarvamNarrationTrack(script, voice.voiceId);
   if (voice.provider === "elevenlabs") {
     const request = buildEducatorSpeechRequest(script, voice.voiceId);
     const response = await fetch(request.url, {
