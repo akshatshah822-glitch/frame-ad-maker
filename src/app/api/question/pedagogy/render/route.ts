@@ -39,6 +39,8 @@ function suppliedRows(value: unknown): PedagogyBriefInputRow[] {
       gsTheme: row.gsTheme,
       orientation: row.effectiveOrientation,
       card: row.showCard ? "yes" : "",
+      // theme = course styles visual rows too, so the reviewed theme goes back for every row (solution rows set it again below).
+      theme: row.effectiveTheme,
       ...(row.journey && typeof row.journey === "object" ? journeyToColumns(row.journey as JourneySpec) : {}),
       ...(row.layout === "solution" ? { problem: row.effectiveProblem, steps: row.effectiveSteps, draw: row.solutionDrawn, theme: row.effectiveTheme, trap: row.effectiveTrap, trick: row.effectiveTrick, remember: row.effectiveRemember } : {}),
     };
