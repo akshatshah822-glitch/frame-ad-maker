@@ -15,6 +15,7 @@ import { crossfadeFrame, TOPIC_TRANSITION_FRAMES, TOPIC_TRANSITION_SECONDS } fro
 import { parsePedagogyVisual } from "@/lib/pedagogy-visual";
 import { createLookFrames, createLookSlide, loadLookPictures, loadPedagogyLogos } from "@/lib/pedagogy-look-slide";
 import { createChapterFrames, createKeyPointsFrames, createPageFrames, loadPagePictures, type PageState } from "@/lib/pedagogy-page";
+import { createCourseFrames } from "@/lib/pedagogy-course";
 import { BOARD_MAX_LINES, parseSolutionDiagram, parseSolutionSteps, solutionDiagramFiles } from "@/lib/pedagogy-solution";
 import { loadPedagogyImage } from "@/lib/pedagogy-infographic";
 import { atlasSceneKey, openJourneyRenderer, planAtlasRow, planJourneyRow } from "@/lib/pedagogy-journey";
@@ -160,6 +161,8 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
   const pages = await loadPagePictures(lookRows.flatMap((row) => { const visual = parsePedagogyVisual(row.visual, row.visualData); return visual.kind === "page" || (visual.kind === "chapter" && visual.file) ? [visual.file] : []; }));
   const missingPages = [...pages].filter(([, page]) => !page).map(([file]) => file);
   if (pages.size) console.info("Pedagogy page slides", { pages: pages.size - missingPages.length, path: missingPages.length ? "missing-page-placeholder" : "page-files", missingPages });
+  // theme = course rows: boards drawn by pedagogy-course; kinds it has no board for fall back to the exam look (counted, logged below).
+  const courseLook = { course: 0, examLookFallback: 0 };
   if (lookRows.length) console.info("Pedagogy look slides", { rows: lookRows.length, logos: logos.size - missingLogos.length, path: missingLogos.length ? "logo-name-tiles" : "logo-files", missingLogos });
   // orientation (Oct 30 2026): portrait draws the solution boards at 1080 × 1920; anything else stays landscape.
   const portrait = timeline.rows.some((row) => row.effectiveOrientation === "portrait");
@@ -338,10 +341,13 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
       } else if (row.layout === "visual") {
         const previous = timeline.rows[index - 1];
         const visual = parsePedagogyVisual(row.visual, row.visualData);
+        // theme = course: cream board and chapter card with no running track; other boards drawn by pedagogy-course.
+        const course = row.effectiveTheme === "course";
+        const progressFor = (r: typeof row) => (course ? undefined : rowProgress(r));
         if (visual.kind === "keypoints") {
           // The recap board sits on the blurred background of the last page shown before it.
           const lastPage = timeline.rows.slice(0, index).reverse().map((r) => r.layout === "visual" ? parsePedagogyVisual(r.visual, r.visualData) : null).find((v) => v?.kind === "page");
-          const frames = await createKeyPointsFrames(lastPage?.kind === "page" ? pages.get(lastPage.file) : null, visual.title, visual.points, row.allocatedDuration, rowProgress(row));
+          const frames = await createKeyPointsFrames(lastPage?.kind === "page" ? pages.get(lastPage.file) : null, visual.title, visual.points, row.allocatedDuration, progressFor(row), course);
           for (const [frame, { png, duration }] of frames.entries()) {
             const framePath = `${framePrefix}-k${String(frame).padStart(3, "0")}.png`;
             await writeFile(framePath, png);
@@ -349,7 +355,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
             lastFrame = framePath;
           }
         } else if (visual.kind === "chapter") {
-          const frames = await createChapterFrames(visual.file ? pages.get(visual.file) : null, visual, row.allocatedDuration, rowProgress(row));
+          const frames = await createChapterFrames(visual.file ? pages.get(visual.file) : null, visual, row.allocatedDuration, progressFor(row), course);
           for (const [frame, { png, duration }] of frames.entries()) {
             const framePath = `${framePrefix}-c${String(frame).padStart(3, "0")}.png`;
             await writeFile(framePath, png);
@@ -368,8 +374,10 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
           }
         } else {
           const holds = visual.kind !== "text" && previous?.layout === "visual" && previous.visual === row.visual && previous.visualData === row.visualData && previous.questionId === row.questionId;
+          const courseFrames = course ? await createCourseFrames(visual, row.board, row.allocatedDuration, pictures, holds) : null;
+          if (course) courseLook[courseFrames ? "course" : "examLookFallback"] += 1;
           const look = { questionId: row.questionId, title: visual.kind === "text" ? "" : row.board, board: row.effectiveBoard, emphasis: row.emphasis, generatedTimeLabel: row.adjustedGeneratedTimeLabel, visual, logos, pictures };
-          const frames = holds ? [{ png: await createLookSlide(look, 1), duration: row.allocatedDuration }] : await createLookFrames(look, row.allocatedDuration);
+          const frames = courseFrames ?? (holds ? [{ png: await createLookSlide(look, 1), duration: row.allocatedDuration }] : await createLookFrames(look, row.allocatedDuration));
           for (const [frame, { png, duration }] of frames.entries()) {
             const framePath = `${framePrefix}-v${String(frame).padStart(3, "0")}.png`;
             await writeFile(framePath, png);
@@ -409,6 +417,7 @@ export async function renderPedagogyVideoToFile(rows: PedagogyRow[], options: Pe
     }
     onProgress?.({ phase: "rendering-slides", completed: index + 1, total: rows.length });
   }
+  if (courseLook.course || courseLook.examLookFallback) console.info("Pedagogy course look", { path: courseLook.examLookFallback ? "course-with-exam-look-fallback" : "course", ...courseLook });
   console.info("Pedagogy topic transitions", { path: crossfades ? "crossfade" : "cut", crossfades, trickCards, hookCards });
   concatLines.push(`file '${lastFrame}'`);
   const concatPath = join(directory, "timeline.txt");

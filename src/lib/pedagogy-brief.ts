@@ -119,7 +119,8 @@ export type PedagogyRow = {
   /** layout = solution: diagram items drawn by this row (0 on other rows). */
   solutionDrawn: number;
   /** layout = solution: theme in force and the margin notes of this question ("" when none). */
-  effectiveTheme: "classic" | "board";
+  /** classic / board: exam solution looks. course: spoken-course look for visual rows (cream board, no exam chrome). */
+  effectiveTheme: "classic" | "board" | "course";
   /** Video shape for the whole sheet: landscape unless the first row says portrait. */
   effectiveOrientation: "landscape" | "portrait";
   /** theme = board: this row shows the trick card instead of the board. */
@@ -347,7 +348,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
   let retainedProblem = "";
   let retainedSteps = "";
   let retainedDrawn = -1;
-  let retainedTheme: "classic" | "board" = "classic";
+  let retainedTheme: "classic" | "board" | "course" = "classic";
   let orientation: "landscape" | "portrait" = "landscape";
   let retainedNotes = { trap: "", trick: "", remember: "" };
   let retainedGsTheme: "" | "journey" | "cinematic" | "atlas" = "";
@@ -461,7 +462,7 @@ export function validatePedagogyRows(inputRows: PedagogyBriefInputRow[]) {
     }
     if (orientation === "portrait" && row.layout !== "solution") throw rowError(row.sourceRow, `orientation "portrait" draws layout = solution only for now (theme classic or board); this row is layout = ${row.layout}.`);
     if (row.themeText) {
-      if (row.themeText !== "classic" && row.themeText !== "board") throw rowError(row.sourceRow, 'theme must be "classic", "board", or blank.');
+      if (row.themeText !== "classic" && row.themeText !== "board" && row.themeText !== "course") throw rowError(row.sourceRow, 'theme must be "classic", "board", "course", or blank.');
       retainedTheme = row.themeText;
     }
     if (row.cardText && !["yes", "no"].includes(row.cardText)) throw rowError(row.sourceRow, 'card must be "yes", "no", or blank.');

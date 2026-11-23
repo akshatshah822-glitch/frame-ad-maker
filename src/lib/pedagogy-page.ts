@@ -331,7 +331,7 @@ export async function createPageFrames(pages: Map<string, PagePicture | null>, s
 
 
 /** Recap board (visual = keypoints): a notebook card over the last page's blurred background; points appear one by one. */
-export async function keyPointsFrame(background: PagePicture | null | undefined, title: string, points: string[], shown: number, progress?: number) {
+export async function keyPointsFrame(background: PagePicture | null | undefined, title: string, points: string[], shown: number, progress?: number, gujaratiLabels = false) {
   const cardX = 140, cardY = 50, cardW = WIDTH - 280, cardH = HEIGHT - 100;
   const top = cardY + 250;
   const step = Math.min(118, (cardY + cardH - 70 - top) / Math.max(1, points.length - 1));
@@ -350,7 +350,7 @@ export async function keyPointsFrame(background: PagePicture | null | undefined,
     <rect x="${cardX}" y="${cardY}" width="${cardW}" height="${cardH}" rx="26" fill="#fbf7ec"/>
     <rect x="${cardX + 66}" y="${cardY}" width="3" height="${cardH}" fill="#e8a0a0" fill-opacity="0.7"/>
     <rect x="${cardX + 96}" y="${cardY + 44}" width="200" height="42" rx="21" fill="#ffd166"/>
-    <text x="${cardX + 196}" y="${cardY + 72}" text-anchor="middle" font-family="${FONT}" font-size="23" font-weight="800" letter-spacing="${GUJARATI.test(title) ? 0 : 2}" fill="#0b1020">${label(title, "REMEMBER", "યાદ રાખો")}</text>
+    <text x="${cardX + 196}" y="${cardY + 72}" text-anchor="middle" font-family="${FONT}" font-size="23" font-weight="800" letter-spacing="${gujaratiLabels || GUJARATI.test(title) ? 0 : 2}" fill="#0b1020">${gujaratiLabels ? "યાદ રાખો" : label(title, "REMEMBER", "યાદ રાખો")}</text>
     <text x="${cardX + 96}" y="${cardY + 160}" font-family="${FONT}" font-size="60" font-weight="800" fill="#0b1020">${escapeXml(title)}</text>
     ${rows.join("")}</svg>`;
   const base = background ? sharp(background.blurred) : sharp({ create: { width: WIDTH, height: HEIGHT, channels: 3, background: "#0b1020" } });
@@ -358,19 +358,20 @@ export async function keyPointsFrame(background: PagePicture | null | undefined,
 }
 
 /** All frames of a recap row: the points appear one by one over at most 60% of the line, then the full board holds. */
-export async function createKeyPointsFrames(background: PagePicture | null | undefined, title: string, points: string[], allocatedDuration: number, progress?: PageProgress) {
+/** `gujaratiLabels` (theme = course): the label is Gujarati even when the title is English. */
+export async function createKeyPointsFrames(background: PagePicture | null | undefined, title: string, points: string[], allocatedDuration: number, progress?: PageProgress, gujaratiLabels = false) {
   const at = (seconds: number) => (progress ? progress.from + (progress.to - progress.from) * clamp(seconds / Math.max(allocatedDuration, 1e-6)) : undefined);
   const seconds = Math.min(points.length * 0.6, allocatedDuration * 0.6);
   const count = Math.max(1, Math.round(seconds * FPS));
   const frames: { png: Buffer; duration: number }[] = [];
-  for (let index = 0; index < count; index += 1) frames.push({ png: await keyPointsFrame(background, title, points, ((index + 1) / count) * points.length, at(index / FPS)), duration: 1 / FPS });
-  frames.push({ png: await keyPointsFrame(background, title, points, points.length, at(count / FPS)), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
+  for (let index = 0; index < count; index += 1) frames.push({ png: await keyPointsFrame(background, title, points, ((index + 1) / count) * points.length, at(index / FPS), gujaratiLabels), duration: 1 / FPS });
+  frames.push({ png: await keyPointsFrame(background, title, points, points.length, at(count / FPS), gujaratiLabels), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
   return frames;
 }
 
 /** Chapter card: the chapter's page blurred behind, "ભાગ 2 / 6" (Part), the title, and a dot per chapter (done ones filled). */
-export async function chapterFrame(background: PagePicture | null | undefined, chapter: { number: number; total: number; title: string }, t: number, progress?: number) {
-  const gujarati = GUJARATI.test(chapter.title);
+export async function chapterFrame(background: PagePicture | null | undefined, chapter: { number: number; total: number; title: string }, t: number, progress?: number, gujaratiLabels = false) {
+  const gujarati = gujaratiLabels || GUJARATI.test(chapter.title);
   const a = easeInOut(clamp(t)), rise = (1 - a) * 40;
   const dots = Array.from({ length: chapter.total }, (_, i) => { const cx = WIDTH / 2 + (i - (chapter.total - 1) / 2) * 56; return i + 1 < chapter.number ? `<circle cx="${cx}" cy="760" r="12" fill="#ffd166"/>` : i + 1 === chapter.number ? `<circle cx="${cx}" cy="760" r="17" fill="#ffd166" stroke="#ffffff" stroke-width="4"/>` : `<circle cx="${cx}" cy="760" r="12" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="3"/>`; }).join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><rect width="${WIDTH}" height="${HEIGHT}" fill="#05070d" fill-opacity="0.35"/>
@@ -386,11 +387,12 @@ export async function chapterFrame(background: PagePicture | null | undefined, c
 }
 
 /** All frames of a chapter row: the card rises in over ~0.8 s, then holds. */
-export async function createChapterFrames(background: PagePicture | null | undefined, chapter: { number: number; total: number; title: string }, allocatedDuration: number, progress?: PageProgress) {
+/** `gujaratiLabels` (theme = course): "ભાગ" even when the chapter title is English. */
+export async function createChapterFrames(background: PagePicture | null | undefined, chapter: { number: number; total: number; title: string }, allocatedDuration: number, progress?: PageProgress, gujaratiLabels = false) {
   const at = (seconds: number) => (progress ? progress.from + (progress.to - progress.from) * clamp(seconds / Math.max(allocatedDuration, 1e-6)) : undefined);
   const count = Math.max(1, Math.round(Math.min(0.8, allocatedDuration * 0.4) * FPS));
   const frames: { png: Buffer; duration: number }[] = [];
-  for (let index = 0; index < count; index += 1) frames.push({ png: await chapterFrame(background, chapter, (index + 1) / count, at(index / FPS)), duration: 1 / FPS });
-  frames.push({ png: await chapterFrame(background, chapter, 1, at(count / FPS)), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
+  for (let index = 0; index < count; index += 1) frames.push({ png: await chapterFrame(background, chapter, (index + 1) / count, at(index / FPS), gujaratiLabels), duration: 1 / FPS });
+  frames.push({ png: await chapterFrame(background, chapter, 1, at(count / FPS), gujaratiLabels), duration: Math.max(1 / FPS, allocatedDuration - count / FPS) });
   return frames;
 }
